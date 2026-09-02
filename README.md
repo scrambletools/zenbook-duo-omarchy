@@ -429,3 +429,9 @@ mute keys should work both docked and detached (section 6c). Touch each screen: 
 Change brightness: both panels should follow. Reboot/shutdown should complete
 without hanging at the splash, and the Omarchy splash itself should be
 upright on both panels.
+
+## License
+
+MIT (see `LICENSE`). The exception is `audio/zenbook-duo-sof-sdw-3.0.0/`,
+which is a modified copy of a GPL-2.0 Linux kernel module and stays under
+that license; see its own sources for attribution.
