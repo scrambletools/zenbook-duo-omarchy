@@ -21,7 +21,7 @@ newer kernel/Omarchy has made one obsolete.
 | Shutdown/reboot hangs at the goodbye splash | same blacklist (see below) | same file |
 | No sound at all ("Dummy Output") | ghost-RT722 DKMS overlay | `audio/` |
 | Detached keyboard won't (re)connect over Bluetooth | pair from the host with one scan open | `scripts/zenbook-duo-keyboard-pair` |
-| Keyboard's brightness / keyboard-backlight / mic-mute keys do nothing | hid-asus on the vendor interface + a small hotkey bridge daemon | `scripts/zenbook-duo-hid-asus`, `scripts/zenbook-duo-fnkeys`, `udev/` |
+| Keyboard's display-brightness / keyboard-backlight / mic-mute keys do nothing | hid-asus on the vendor interface + a small hotkey bridge daemon | `scripts/zenbook-duo-hid-asus`, `scripts/zenbook-duo-fnkeys`, `udev/` |
 
 ---
 
