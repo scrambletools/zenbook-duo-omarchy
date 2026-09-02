@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Zenbook Duo: mirror the top panel's brightness onto the bottom panel.
+#
+# The OS only exposes the top screen (intel_backlight) to brightness keys
+# and the DE; the bottom panel's own backlight (card0-eDP-2-backlight)
+# never follows and can be left near 0. Watch the top backlight and copy
+# its percentage across. Syncing while the panel is disabled is harmless.
+#
+# Started from ~/.config/hypr/autostart.lua.
+
+TOP="/sys/class/backlight/intel_backlight"
+BOTTOM_DEV="card0-eDP-2-backlight"
+
+sync_brightness() {
+  local cur max pct
+  cur=$(cat "$TOP/brightness" 2>/dev/null) || return
+  max=$(cat "$TOP/max_brightness" 2>/dev/null) || return
+  ((max > 0)) || return
+  pct=$((100 * cur / max))
+  brightnessctl --device="$BOTTOM_DEV" set "${pct}%" >/dev/null 2>&1
+}
+
+sync_brightness
+
+while true; do
+  inotifywait -qq -e modify "$TOP/brightness" 2>/dev/null || sleep 5
+  sync_brightness
+done

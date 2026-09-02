@@ -1,0 +1,12 @@
+[Unit]
+Description=Zenbook Duo keyboard Fn keys (ASUS hotkey reports -> input events)
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/zenbook-duo-fnkeys
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

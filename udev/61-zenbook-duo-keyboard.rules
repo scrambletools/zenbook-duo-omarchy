@@ -1,0 +1,5 @@
+# Zenbook Duo keyboard: hand the keyboard interface to hid-asus so the Fn keys
+# work (see scripts/zenbook-duo-hid-asus). Fires when the interface lands on
+# hid-generic, over USB (docked, 1cd7) or Bluetooth (detached, 1cd8).
+# systemd-run detaches the rebind from the udev worker that is mid-bind.
+ACTION=="bind", SUBSYSTEM=="hid", DRIVER=="hid-generic", ENV{HID_ID}=="*:00000B05:00001CD[78]", RUN+="/usr/bin/systemd-run --no-block --quiet /usr/local/bin/zenbook-duo-hid-asus %k"

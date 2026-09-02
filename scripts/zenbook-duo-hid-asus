@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Bind the kernel's ASUS HID driver to a Zenbook Duo keyboard interface.
+
+The 2026 Zenbook Duo keyboard (USB 0b05:1cd7 when docked, Bluetooth
+0b05:1cd8 when detached) is not in hid-asus's device table, so it lands on
+hid-generic and its Fn keys (brightness, keyboard backlight, mic mute, …),
+which arrive on ASUS's vendor usage page 0xFF31, are dropped. hid-asus maps
+them once it owns the interface. Only the interface whose report descriptor
+declares that vendor page is rebound; the touchpad and the others stay put.
+
+usage: zenbook-duo-hid-asus <hid-device-id>      e.g. 0005:0B05:1CD8.002A
+Run as root; the udev rule in udev/61-zenbook-duo-keyboard.rules calls it.
+"""
+import os, subprocess, sys, time
+
+HID = "/sys/bus/hid/devices"
+VENDOR_PAGE = bytes.fromhex("0631ff")   # Usage Page (0xFF31)
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    dev = sys.argv[1]
+    path = f"{HID}/{dev}"
+    if not os.path.isdir(path):
+        sys.exit(f"{dev}: no such HID device")
+    bus, vendor, product = dev.split(".")[0].split(":")
+    if vendor.upper() != "0B05" or product.upper() not in ("1CD7", "1CD8"):
+        sys.exit(0)  # not this keyboard
+    with open(f"{path}/report_descriptor", "rb") as f:
+        if VENDOR_PAGE not in f.read():
+            sys.exit(0)  # not the keyboard interface (touchpad, sensors, …)
+
+    subprocess.run(["modprobe", "hid_asus"], check=False)
+    # QUIRK_USE_KBD_BACKLIGHT (bit 5): register the keyboard backlight LED,
+    # which the keyboard drives over its 0x5a vendor channel.
+    for attr, arg in (("remove_id", f"{bus} {vendor} {product}"), ("new_id", f"{bus} {vendor} {product} 20")):
+        try:
+            with open(f"/sys/bus/hid/drivers/asus/{attr}", "w") as f:
+                f.write(arg + "\n")
+        except OSError:
+            pass
+    current = os.path.basename(os.readlink(f"{path}/driver")) if os.path.islink(f"{path}/driver") else ""
+    if current == "asus":
+        return
+    if current:
+        with open(f"/sys/bus/hid/drivers/{current}/unbind", "w") as f:
+            f.write(dev)
+        time.sleep(0.2)
+    with open("/sys/bus/hid/drivers/asus/bind", "w") as f:
+        f.write(dev)
+    print(f"{dev}: {current or 'unbound'} -> asus")
+
+main()

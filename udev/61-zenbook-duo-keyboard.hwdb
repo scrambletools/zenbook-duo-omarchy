@@ -1,0 +1,11 @@
+# Zenbook Duo detachable keyboard (USB 0b05:1cd7 docked, Bluetooth 0b05:1cd8):
+# its brightness, keyboard-backlight and mic-mute keys send plain F6/F5/F4/F10
+# (no vendor hotkey codes, and nothing at all with Fn held), so map those
+# scancodes to the functions printed on the keys, for this keyboard only.
+# Volume keys already send proper consumer codes and need nothing.
+evdev:input:b0003v0B05p1CD7*
+evdev:input:b0005v0B05p1CD8*
+ KEYBOARD_KEY_7003d=kbdillumtoggle
+ KEYBOARD_KEY_7003e=brightnessdown
+ KEYBOARD_KEY_7003f=brightnessup
+ KEYBOARD_KEY_70043=micmute

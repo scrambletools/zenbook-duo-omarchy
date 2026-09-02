@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Zenbook Duo: sync the bottom panel (eDP-2) with the pogo-pin keyboard.
+# Keyboard docked  -> bottom screen off (it's covered by the keyboard).
+# Keyboard removed -> bottom screen on, per ~/.config/hypr/monitors.lua.
+#
+# Started from ~/.config/hypr/autostart.lua.
+#
+# Design notes:
+# - Uses Omarchy's toggle mechanism (the same one clamshell mode uses):
+#   Lua files in the toggles dir load on every config reload, AFTER user
+#   config, so the disable rule survives any `hyprctl reload` and never
+#   fights omarchy-hyprland-monitor-watch's recovery reloads. One reload
+#   per dock/undock is the only modeset that happens.
+# - The toggle file's existence IS the applied state - no Hyprland polling
+#   (IPC stalls during modesets and misreads caused toggle storms).
+
+KB_VENDOR="0b05"
+KB_PRODUCT="1cd7" # ASUS Zenbook Duo Keyboard (2026 / 144Hz model)
+TOGGLE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/toggles/hypr/zenbook-duo-keyboard.lua"
+DISABLE_RULE='hl.monitor({ output = "eDP-2", disabled = true })'
+
+kb_state() {
+  local dev
+  for dev in /sys/bus/usb/devices/*/idVendor; do
+    if [[ -r $dev && $(<"$dev") == "$KB_VENDOR" && $(<"${dev%idVendor}idProduct") == "$KB_PRODUCT" ]]; then
+      echo attached
+      return
+    fi
+  done
+  echo absent
+}
+
+# Two consistent reads 1s apart; rides out pogo-contact bounce and the
+# udev event storm from the keyboard's composite sub-devices.
+stable_kb_state() {
+  local a b
+  while true; do
+    a=$(kb_state)
+    sleep 1
+    b=$(kb_state)
+    [[ $a == "$b" ]] && { echo "$a"; return; }
+  done
+}
+
+apply() {
+  local state=$1 have=absent
+  [[ -f $TOGGLE ]] && have=attached
+  [[ $state == "$have" ]] && return
+  if [[ $state == attached ]]; then
+    mkdir -p "${TOGGLE%/*}"
+    printf '%s\n' "$DISABLE_RULE" >"$TOGGLE"
+  else
+    rm -f "$TOGGLE"
+  fi
+  hyprctl reload >/dev/null 2>&1
+  if [[ $state == absent ]]; then
+    # Re-enabling via reload doesn't always power the panel back up
+    # (same reason omarchy's clamshell fires dpms after enabling).
+    sleep 1
+    hyprctl dispatch 'hl.dsp.dpms({ action = "enable", monitor = "eDP-2" })' >/dev/null 2>&1
+  fi
+}
+
+apply "$(stable_kb_state)"
+
+while true; do
+  udevadm monitor -u -s usb 2>/dev/null | {
+    while true; do
+      read -r _ || break               # EOF: udevadm exited; restart it
+      while read -r -t 0.5 _; do :; done # drain the event burst
+      apply "$(stable_kb_state)"
+    done
+  }
+  sleep 5
+done

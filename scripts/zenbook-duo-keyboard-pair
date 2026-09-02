@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Zenbook Duo: pair the detachable keyboard over Bluetooth.
+#
+# The keyboard mints a new Bluetooth address every time it enters pairing
+# mode, so the bond the laptop holds goes stale and BlueZ ignores the "new"
+# device. Omarchy's auto-accept pairing agent also rejects pairings the
+# keyboard starts itself. This script does what works: keeps one scan open,
+# pairs any "ASUS Zenbook Duo Keyboard" that advertises, trusts it, connects,
+# and removes stale entries for the same name. Start it, THEN undock the
+# keyboard and hold its Bluetooth key ~3 s until the indicator blinks.
+#
+# usage: zenbook-duo-keyboard-pair [seconds]   (default 300)
+
+NAME="ASUS Zenbook Duo Keyboard"
+LIMIT="${1:-300}"
+
+keyboards() { bluetoothctl devices | grep -F "$NAME" | awk '{print $2}'; }
+
+bluetoothctl pairable on >/dev/null
+timeout "$LIMIT" bluetoothctl scan le >/dev/null 2>&1 &
+scan=$!
+trap 'kill $scan 2>/dev/null' EXIT
+
+echo "Undock the keyboard and hold its Bluetooth key until the light blinks. Waiting up to ${LIMIT}s…"
+start=$(date +%s)
+while (( $(date +%s) - start < LIMIT )); do
+  sleep 5
+  for mac in $(keyboards); do
+    info=$(bluetoothctl info "$mac")
+    if grep -q "Connected: yes" <<<"$info"; then
+      echo "Connected: $mac"
+      bluetoothctl trust "$mac" >/dev/null
+      for old in $(keyboards); do
+        [[ $old == "$mac" ]] || { bluetoothctl remove "$old" >/dev/null 2>&1 && echo "Removed stale entry $old"; }
+      done
+      exit 0
+    fi
+    grep -q "RSSI" <<<"$info" || continue   # not in range right now
+    if grep -q "Paired: yes" <<<"$info"; then
+      echo "$mac is known and in range, connecting…"
+      timeout 20 bluetoothctl connect "$mac" >/dev/null 2>&1
+    else
+      echo "$mac is new, pairing…"
+      timeout 45 bluetoothctl pair "$mac" >/dev/null 2>&1 && bluetoothctl trust "$mac" >/dev/null
+      timeout 20 bluetoothctl connect "$mac" >/dev/null 2>&1
+    fi
+  done
+done
+echo "No keyboard connected within ${LIMIT}s. Is it undocked, switched on, and blinking?" >&2
+exit 1
