@@ -333,16 +333,26 @@ that is still bonded, do not hold the Bluetooth key — a keypress is enough.
 ### 6c. The keyboard's special function keys
 
 Volume up/down/mute on the F-row work out of the box (ordinary consumer-page
-keys). Brightness down/up, keyboard backlight and mic mute do not, docked or
-on Bluetooth. What is going on, found by capturing the raw HID traffic:
+keys). Four other F-row keys do not, docked or on Bluetooth:
+
+| Key (F-row) | What it should do |
+|---|---|
+| Display brightness down / up (F5 / F6) | Dim / brighten the **screens** — the same thing the Omarchy brightness slider does (needs the OLED fix from section 3a to be visible) |
+| Keyboard backlight (F4) | **Cycle the keyboard's own key backlight** through its levels (off, low, mid, high) |
+| Mic mute (F10) | Toggle the microphone |
+
+Two different backlights are involved, so to be clear: the two *brightness*
+keys drive the display panels, and the single *keyboard backlight* key
+drives the LEDs under the keycaps and only cycles those. What is going on,
+found by capturing the raw HID traffic:
 
 - Until an ASUS driver has claimed the keyboard's **vendor interface** (the
   one whose report descriptor declares usage page `0xFF31`), the firmware
   sends those keys as plain **F5/F6/F4/F10** and nothing at all with Fn held.
 - Once `hid-asus` is bound to that interface *with its keyboard-backlight
   quirk*, the firmware switches to real ASUS hotkey reports: report id `0x5a`
-  with one code byte (`0x20` brightness up, `0x10` down, `0xc7` keyboard
-  backlight, `0x7c` mic mute).
+  with one code byte (`0x20` display brightness up, `0x10` display
+  brightness down, `0xc7` keyboard backlight cycle, `0x7c` mic mute).
 - `hid-asus` would normally map those codes to keys, but this keyboard
   declares the `0x5a` report as a single `Usage 0x76` with variable data,
   not the usage array the driver's mapping table works on; the driver only
@@ -357,14 +367,18 @@ Three pieces, all installed by `setup.sh`:
    vendor interface lands on `hid-generic`; it adds the id with
    `QUIRK_USE_KBD_BACKLIGHT` (`new_id … 20`) and rebinds. That both enables
    the hotkey reports and registers `/sys/class/leds/asus::kbd_backlight`
-   (levels 0–3), which `omarchy brightness keyboard up|down|cycle` drives.
+   (levels 0–3) for the keyboard's key backlight, which
+   `omarchy brightness keyboard up|down|cycle` drives. (Display brightness
+   needs no LED: it goes through `intel_backlight`, section 3a.)
    Side effect: the driver renames the keyboard "Asus Keyboard".
 2. **`scripts/zenbook-duo-fnkeys` + `udev/zenbook-duo-fnkeys.service`** — a
    root daemon that follows those interfaces as they come and go (dock,
    undock, Bluetooth), reads the `0x5a` reports from `hidraw`, and injects
-   the matching keys (`KEY_BRIGHTNESSUP`, `KEY_MICMUTE`, …) through
-   `/dev/uinput` as a virtual keyboard "Zenbook Duo Keyboard Fn keys".
-   Omarchy's stock bindings then fire. Unknown codes are logged
+   the matching keys through `/dev/uinput` as a virtual keyboard "Zenbook
+   Duo Keyboard Fn keys": `KEY_BRIGHTNESSDOWN` / `KEY_BRIGHTNESSUP` for the
+   display, `KEY_KBDILLUMTOGGLE` for the keyboard backlight, `KEY_MICMUTE`.
+   Omarchy's stock bindings then fire — display brightness steps the panels,
+   the backlight key cycles the LED levels, mic mute toggles the microphone. Unknown codes are logged
    (`journalctl -u zenbook-duo-fnkeys`) so new keys are easy to add.
 3. **`udev/61-zenbook-duo-keyboard.hwdb`** — belt and braces: maps the plain
    F5/F6/F4/F10 scancodes to the same functions for this keyboard only, so
