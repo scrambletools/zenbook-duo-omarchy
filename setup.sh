@@ -40,6 +40,8 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-brightness-sync" \
   "$HOME/.config/zenbook/zenbook-duo-brightness-sync"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-keyboard-pair" \
   "$HOME/.config/zenbook/zenbook-duo-keyboard-pair"
+# Dock mode: "disable" (modeset, Windows-like) unless the user already chose.
+[[ -e "$HOME/.config/zenbook/dock-mode" ]] || echo disable >"$HOME/.config/zenbook/dock-mode"
 
 echo "==> Audio: ghost-RT722 DKMS overlay (skips itself on fixed kernels)"
 pkexec bash "$HERE/audio/install-audio-fix.sh"

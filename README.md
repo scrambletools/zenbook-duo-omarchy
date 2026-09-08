@@ -138,19 +138,22 @@ o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watc
 `zenbook-duo-screen-watch` has two ways to put the covered screen to sleep,
 chosen by the one-word file `~/.config/zenbook/dock-mode`:
 
-- **`backlight`** (default, no file needed): eDP-2 stays enabled and its
-  backlight is driven to 0 while docked (`zenbook-duo-brightness-sync` holds
-  it there), restored to the top panel's level on undock. **No modeset at
-  all**, so the xe driver never powers the panel's PHY down and up — which is
-  what hard-hangs this machine on kernel 7.1 (2a below). While docked the
-  panel is also *parked*: moved to a far-off layout position so the cursor
-  cannot cross onto it, its workspaces moved to the top panel, workspaces
-  1–10 pinned to the top panel, and the empty workspace Hyprland insists on
-  keeping there renumbered to 99 ("dock"). Undocking reverses all of it and
-  puts workspace 2 back on the bottom panel. All compositor-side, no modeset.
-- **`disable`**: the original behaviour, disabling the output through
-  Omarchy's toggle mechanism (one modeset per dock/undock). Nicer when it
-  works; switch back to it only once a kernel stops failing 2a.
+- **`disable`** (recommended; `setup.sh` writes this): disable the output
+  through Omarchy's toggle mechanism, one modeset per dock and undock. This
+  is what Windows does through ScreenXpert, and what the 2024-Duo Linux
+  tooling does too. Verified clean on kernel 7.1.9 once the hardware is
+  healthy (section 2a).
+- **`backlight`** (the fallback, and the script's built-in default when no
+  mode file exists): eDP-2 stays enabled and its backlight is driven to 0
+  while docked (`zenbook-duo-brightness-sync` holds it there), restored to
+  the top panel's level on undock. **No modeset at all**, so the driver
+  never powers the panel's PHY down and up. While docked the panel is also
+  *parked*: moved to a far-off layout position so the cursor cannot cross
+  onto it, its workspaces moved to the top panel, workspaces 1–10 pinned
+  to the top panel, and the empty workspace Hyprland insists on keeping
+  there renumbered to 99 ("dock"). Undocking reverses all of it. Use this
+  when a modeset on eDP-2 is failing (2a) — it keeps the machine usable
+  while you sort out the cause.
 - For a single risky test, write the mode to `~/.config/zenbook/dock-mode-once`
   instead: the watcher consumes that file on its next start, so a boot that
   hangs cannot leave the mode armed for the boot after.
