@@ -11,9 +11,11 @@ binary referenced here ships in this directory, ready to copy.
 > firmware, because the keyboard was sitting on it when the machine powered
 > on. Power off completely, lift the keyboard off, power on, and dock it only
 > once the disk-unlock prompt is showing on *both* screens (the bottom one
-> lights first). A reboot does not help while the keyboard is docked. Details
-> and the evidence in section 2b. (A top screen that goes dark right after
-> login is a different problem, section 2a.)
+> lights first). A reboot does not help, and neither does a quick power-off:
+> the bad state survives them. Shut down, unplug the charger, hold the power
+> button for 15 seconds, leave it off for a minute, then power on with the
+> keyboard off. Details and the evidence in section 2b. (A top screen that
+> goes dark right after login is a different problem, section 2a.)
 
 **Quick start:** `bash setup.sh` (it asks before appending its three blocks to
 your Hyprland config), power off, and power on with the keyboard lifted off
@@ -212,14 +214,18 @@ the bottom panel, then dock the keyboard at the disk-unlock prompt and type.
 From then on dock and undock freely, but not while the machine is shutting
 down or rebooting.
 
-That is not the whole story yet. With the keyboard docked at the prompt,
-about one boot in two here still ends up wedged: two seconds after the main
-system starts its boot splash, the driver's backlight write to the bottom
-panel times out ("AUX B … Failed to write aux backlight level: -110"), and
-the first undock after login fails. Forcing the connector off during boot
-(`video=eDP-2:d`) did not prevent it. Whether docking during boot is the
-trigger is still being established; see the upstream issue below for the
-current state.
+**Recovery.** Once the port has wedged, the bad state outlives the boot: a
+warm reboot carries it forward, and so does a quick power-off. The next
+boot then fails on its own, two seconds after the main system's boot splash
+starts ("AUX B … Failed to write aux backlight level: -110", then pipe B
+timeouts), with the keyboard nowhere near the laptop (verified by booting
+with an external USB keyboard for the disk password). What clears it is a
+real power reset: shut down, unplug the charger, hold the power button for
+15 seconds, leave the machine off for a minute, then power on with the
+keyboard off. A firmware "load setup defaults" clears it too, which is how
+this was first misread as a firmware problem. The state is therefore held
+by something that stays powered through a short shutdown, the embedded
+controller or the panel itself, not by the SoC.
 
 Once the port is wedged, every display update that touches it blocks the
 compositor for a ten-second kernel timeout, which is the "dead keyboard"
