@@ -141,6 +141,12 @@ apply() {
     fi
     return
   fi
+  # disable mode: make sure the backlight-mode state file is not left over,
+  # or zenbook-duo-brightness-sync would keep eDP-2 dark after an undock.
+  if [[ -f $DOCKED_STATE ]]; then
+    rm -f "$DOCKED_STATE"
+    [[ $state == absent ]] && brightnessctl --device="$BOTTOM_BL" set "$(top_percent)%" >/dev/null 2>&1
+  fi
   [[ -f $TOGGLE ]] && have=attached
   [[ $state == "$have" ]] && return
   if [[ $state == attached ]]; then
@@ -155,6 +161,7 @@ apply() {
     # (same reason omarchy's clamshell fires dpms after enabling).
     sleep 1
     hyprctl dispatch 'hl.dsp.dpms({ action = "enable", monitor = "eDP-2" })' >/dev/null 2>&1
+    brightnessctl --device="$BOTTOM_BL" set "$(top_percent)%" >/dev/null 2>&1
   fi
 }
 
