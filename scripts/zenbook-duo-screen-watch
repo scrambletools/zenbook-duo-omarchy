@@ -117,9 +117,16 @@ apply() {
 }
 
 # A boot that started docked, or that inherited a wedged PHY from a warm
-# reboot, already shows the signature in the kernel log.
-if [[ ! -f $WEDGED ]] && wedged_in_log; then
-  mark_wedged
+# reboot, already shows the signature in the kernel log. Otherwise clear the
+# notification a previous boot may have left behind: Omarchy keeps critical
+# notifications across logins, and a stale one would announce a wedge that
+# the power reset has just fixed.
+if [[ ! -f $WEDGED ]]; then
+  if wedged_in_log; then
+    mark_wedged
+  else
+    omarchy-notification-dismiss "Bottom screen unavailable" >/dev/null 2>&1 || true
+  fi
 fi
 
 apply "$(stable_kb_state)"
