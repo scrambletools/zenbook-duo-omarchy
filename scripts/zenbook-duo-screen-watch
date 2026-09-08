@@ -14,6 +14,12 @@
 # - The toggle file's existence IS the applied state - no Hyprland polling
 #   (IPC stalls during modesets and misreads caused toggle storms).
 
+# Only one instance: Hyprland can run autostart more than once (config reloads,
+# shell restarts), and two watchers racing on the same modeset is exactly the
+# kind of double enable/disable the xe display driver does not survive.
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/zenbook-duo-screen-watch.lock"
+flock -n 9 || exit 0
+
 KB_VENDOR="0b05"
 KB_PRODUCT="1cd7" # ASUS Zenbook Duo Keyboard (2026 / 144Hz model)
 TOGGLE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/toggles/hypr/zenbook-duo-keyboard.lua"
