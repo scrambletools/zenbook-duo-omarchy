@@ -146,8 +146,14 @@ the keyboard away. `scripts/zenbook-duo-screen-watch` does this:
   shutting down; re-enabling it then only stalls the shutdown (section 2b).
 - Checks the kernel log after each re-enable and at startup. If the panel's
   PHY has failed (section 2b), it disables the panel again, leaves it alone
-  for the rest of the boot, and sends one notification telling you to power
-  off fully. Without this, every dock event costs a ten-second freeze.
+  for the rest of the boot, and sends one critical notification telling you
+  to power off fully. Without this, every dock event costs a ten-second
+  freeze.
+- Retires that notification itself, both when it stops (shutdown included)
+  and again when it starts, and raises a fresh one only if the new boot is
+  wedged too. Omarchy restores critical toasts at the next login, and a
+  warning left over from a boot the power reset has just fixed would be
+  misleading. Only its own message is touched.
 
 `setup.sh` installs it to `~/.config/zenbook/` and offers to append the
 start line to `~/.config/hypr/autostart.lua`:
