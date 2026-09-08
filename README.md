@@ -13,7 +13,7 @@ newer kernel/Omarchy has made one obsolete.
 |---|---|---|
 | Top screen upside down (boot splash, console and desktop); panels not stacked | kernel panel-orientation parameter + Hyprland monitor layout | `boot/zenbook-duo-panel-orientation.conf`, `hypr/monitors.lua` |
 | Bottom screen stays on under the docked keyboard | dock/undock watcher | `scripts/zenbook-duo-screen-watch`, `hypr/autostart.lua` |
-| Undocking (or booting docked) hard-hangs the machine; bottom screen never comes back | Panel Replay off | `boot/zenbook-duo-panel-replay.conf` |
+| Undocking (or booting docked) hard-hangs the machine; bottom screen dark even though "on" | firmware defaults reset after a deep battery drain (section 2a); Panel Replay off | `boot/zenbook-duo-panel-replay.conf` |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
@@ -169,12 +169,25 @@ xe … PHY B failed to request refclk / PLL not locked
 xe … *ERROR* [CONNECTOR:521:eDP-2] Failed to enable link training
 ```
 
-**Status:** the root cause is not pinned down. It is not Panel Replay alone
-(disabling it, below, left the failure in place), not the USB-C charger
-(fails on battery too), not display C-states (`xe.enable_dc=0` changed
-nothing: the boot-time disable still hit "pipe_off wait timed out" and the
-PHY B failures), not a package update (none between the good and bad days),
-and not firmware (same BIOS). What is certain: the xe driver on
+**Resolved (2026-09-07): it was firmware/EC state, not software.** The
+laptop had been fully drained flat and recharged between the good day and
+the bad days. After that, every modeset on the bottom panel failed at the
+PHY ("PHY B failed to request refclk"), its AUX channel timed out, and the
+panel stayed black even though the driver believed it was scanning out —
+while the firmware could still light it at the disk-unlock prompt. **Loading
+setup defaults in the BIOS** (F2, or `systemctl reboot --firmware-setup`;
+keep Secure Boot off and the storage mode unchanged, check Limine stays the
+first boot entry) brought it back: next boot, zero display errors and the
+panel's AUX channel answered again. So: after a deep battery drain, if the
+bottom panel goes dark and the log fills with PHY B errors, reset the
+firmware to defaults before touching anything in Linux.
+
+Things ruled out on the way, kept here so nobody repeats them: Panel Replay
+alone (disabling it, below, left the failure in place), the USB-C charger
+(failed on battery too), display C-states (`xe.enable_dc=0` changed nothing:
+the boot-time disable still hit "pipe_off wait timed out" and the PHY B
+failures), package updates (none between the good and bad days), and the
+BIOS version (unchanged). What is certain: the xe driver on
 7.1.9 cannot reliably bring PHY B back up after the pipe was disabled
 ("PHY B failed to request refclk"), and once that happens the next commit
 wedges the display engine. Hence the default **backlight dock mode** above,
