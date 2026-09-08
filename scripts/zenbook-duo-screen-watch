@@ -73,10 +73,25 @@ wedged_in_log() {   # [since], default: the whole boot
   journalctl -k -b -q ${1:+--since "$1"} 2>/dev/null | grep -qE "$WEDGE_PATTERN"
 }
 
+NOTIFY_SUMMARY="Bottom screen unavailable"
+NOTIFY_STORE="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/notifications"
+
+# Take our notification down: through the shell while it runs, and from the
+# store it restores toasts from at login (the shell keeps critical ones
+# across logins, and at shutdown it may already be gone).
+retire_notification() {
+  omarchy-notification-dismiss "$NOTIFY_SUMMARY" >/dev/null 2>&1 || true
+  local f
+  for f in "$NOTIFY_STORE"/*.json; do
+    [[ -f $f ]] && grep -qF "\"summary\":\"$NOTIFY_SUMMARY\"" "$f" && rm -f "$f"
+  done
+  return 0
+}
+
 mark_wedged() {
   : >"$WEDGED"
   echo "zenbook-duo-screen-watch: bottom panel PHY wedged; leaving eDP-2 disabled until reboot" >&2
-  omarchy-notification-send -u critical "Bottom screen unavailable" \
+  omarchy-notification-send -u critical "$NOTIFY_SUMMARY" \
     "Its display PHY failed to come back. Power off fully (not reboot) and power on with the keyboard off the laptop." >/dev/null 2>&1 ||
     notify-send "Bottom screen unavailable" "Power off fully and power on with the keyboard off the laptop." >/dev/null 2>&1
 }
@@ -116,11 +131,13 @@ apply() {
   fi
 }
 
-# Omarchy keeps critical notifications across logins, so first retire the
-# one a previous boot may have left behind; a wedge is announced afresh
-# below if this boot has it. A boot that started docked, or that inherited
+# Retire the previous boot's notification at startup (in case the watcher
+# did not get to do it at shutdown) and whenever this watcher stops, so a
+# stale warning never greets the next login. A wedge is announced afresh
+# below if this boot has it: a boot that started docked, or that inherited
 # a wedged PHY, already shows the signature in the kernel log.
-omarchy-notification-dismiss "Bottom screen unavailable" >/dev/null 2>&1 || true
+trap retire_notification EXIT
+retire_notification
 if [[ ! -f $WEDGED ]] && wedged_in_log; then
   mark_wedged
 fi
