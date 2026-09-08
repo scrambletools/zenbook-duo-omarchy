@@ -13,6 +13,7 @@ newer kernel/Omarchy has made one obsolete.
 |---|---|---|
 | Top screen upside down (boot splash, console and desktop); panels not stacked | kernel panel-orientation parameter + Hyprland monitor layout | `boot/zenbook-duo-panel-orientation.conf`, `hypr/monitors.lua` |
 | Bottom screen stays on under the docked keyboard | dock/undock watcher | `scripts/zenbook-duo-screen-watch`, `hypr/autostart.lua` |
+| Undocking (or booting docked) hard-hangs the machine; bottom screen never comes back | Panel Replay off | `boot/zenbook-duo-panel-replay.conf` |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
@@ -131,6 +132,38 @@ Install to `~/.config/zenbook/` and start it from
 -- Zenbook Duo: toggle bottom screen when the pogo-pin keyboard docks/undocks.
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watch")
 ```
+
+### 2a. Undocking hangs the whole machine (Panel Replay)
+
+Symptom: lift the keyboard, the bottom screen stays black, the top screen
+freezes within seconds, and the box is dead — not even a USB keyboard works;
+power-cycle. In the kernel log the sequence is always the same, starting on
+the *top* panel's pipe:
+
+```
+xe … *ERROR* Timed out waiting PSR idle state
+xe … *ERROR* [CRTC:151:pipe A] flip_done timed out
+xe … PHY B failed to request refclk / PLL not locked
+xe … *ERROR* [CONNECTOR:521:eDP-2] Failed to enable link training
+```
+
+The cause is **eDP Panel Replay** (the successor of PSR) on eDP-1. Both OLED
+panels advertise it and the xe driver turns it on by default
+(`xe.enable_panel_replay=-1`). `xe.enable_psr=0` does *not* cover it —
+Panel Replay has its own switch — and `/sys/kernel/debug/dri/0/eDP-1/i915_psr_status`
+shows "Panel Replay Selective Update enabled" regardless. When the dock
+watcher's reload re-enables eDP-2, the atomic commit first has to wake eDP-1
+out of Panel Replay; that wait times out, the display engine wedges, and the
+bring-up of PHY B then fails until reboot. The same can happen at boot with
+the keyboard docked, when the disable of eDP-2 is the first modeset.
+
+`boot/zenbook-duo-panel-replay.conf` adds `xe.enable_panel_replay=0` (drop-in
+for `limine-entry-tool`, installed by `setup.sh`; `sudo limine-update` and
+reboot). Cost: a little idle power on eDP-1, the same trade as `enable_psr=0`.
+
+Also relevant: `zenbook-duo-screen-watch` now takes a lock, because Hyprland
+can start it twice (once per autostart pass) and two watchers racing the same
+modeset made the failure far more likely.
 
 ## 3. Brightness
 
@@ -410,6 +443,8 @@ The working machine also boots with these parameters (drop-ins in
   `monitors.lua` shipped here; see section 1a.
 - `xe.enable_dpcd_backlight=1` — **required** for brightness control at all
   on these OLED panels; see section 3a.
+- `xe.enable_panel_replay=0` — **required** or undocking hard-hangs the
+  machine; see section 2a.
 - `xe.enable_psr=0` — disables Panel Self Refresh on the Intel Xe driver,
   a common cure for flicker/artifacts on eDP panels.
 - `rtc_cmos.use_acpi_alarm=1` — makes RTC wake alarms go through ACPI.
@@ -427,6 +462,8 @@ cat /proc/asound/cards             # one real card
 hyprctl monitors                   # eDP-1 transform 0 @ 0x0 (upright), eDP-2 @ 0x900
 grep -o 'panel_orientation=[a-z_]*' /proc/cmdline   # upside_down
 grep -o 'enable_dpcd_backlight=[0-9]' /proc/cmdline # 1
+grep -o 'enable_panel_replay=[0-9]' /proc/cmdline   # 0
+sudo grep "PSR mode" /sys/kernel/debug/dri/0/eDP-1/i915_psr_status   # disabled
 brightnessctl set 30%; sleep 2; brightnessctl set 60%  # top panel visibly dims/brightens
 bluetoothctl devices Paired | grep 'Zenbook Duo Keyboard'   # exactly one entry
 ls /sys/class/leds | grep kbd_backlight   # asus::kbd_backlight once the keyboard is docked/connected
