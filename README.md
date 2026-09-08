@@ -5,6 +5,17 @@ Everything needed to make a 2026 Zenbook Duo UX8407AA fully work under
 machine working in September 2026 on kernel `7.1.9-arch1-2`. Every config and
 binary referenced here ships in this directory, ready to copy.
 
+> **If the bottom screen suddenly died after the battery ran completely flat:**
+> stop, do not debug Linux. Boot into firmware setup (`F2`, or
+> `systemctl reboot --firmware-setup`), **load setup defaults**, re-disable
+> Secure Boot, leave the storage mode alone, check Limine is still first,
+> and reboot. That is the whole fix. The full drain corrupts embedded-controller
+> state that only a defaults reset clears; the symptoms are a black bottom
+> panel that the driver still believes is on, `PHY B failed to request refclk`
+> in the kernel log, and hard hangs on undock. Details in section 2a. While
+> the machine is healthy, run `scripts/zenbook-duo-firmware-baseline` once so
+> you have something to diff against (`reference/` holds ours).
+
 **Quick start:** `bash setup.sh`, merge the three Hyprland snippets it points
 you at, reboot. The sections below explain each fix so you can tell whether a
 newer kernel/Omarchy has made one obsolete.
@@ -13,7 +24,7 @@ newer kernel/Omarchy has made one obsolete.
 |---|---|---|
 | Top screen upside down (boot splash, console and desktop); panels not stacked | kernel panel-orientation parameter + Hyprland monitor layout | `boot/zenbook-duo-panel-orientation.conf`, `hypr/monitors.lua` |
 | Bottom screen stays on under the docked keyboard | dock/undock watcher | `scripts/zenbook-duo-screen-watch`, `hypr/autostart.lua` |
-| Undocking (or booting docked) hard-hangs the machine; bottom screen dark even though "on" | firmware defaults reset after a deep battery drain (section 2a); Panel Replay off | `boot/zenbook-duo-panel-replay.conf` |
+| Undocking (or booting docked) hard-hangs the machine; bottom screen dark even though "on" | firmware defaults reset after a deep battery drain (section 2a); Panel Replay off | `boot/zenbook-duo-panel-replay.conf`, `scripts/zenbook-duo-firmware-baseline`, `reference/` |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
