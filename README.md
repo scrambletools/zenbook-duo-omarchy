@@ -15,14 +15,15 @@ binary referenced here ships in this directory, ready to copy.
 > and the evidence in section 2a.
 
 **Quick start:** `bash setup.sh`, merge the three Hyprland snippets it points
-you at, reboot. The sections below explain each fix so you can tell whether a
-newer kernel/Omarchy has made one obsolete.
+you at, power off, and power on with the keyboard lifted off (section 2a).
+The sections below explain each fix so you can tell whether a newer
+kernel/Omarchy has made one obsolete.
 
 | Problem out of the box | Fix | Files |
 |---|---|---|
 | Top screen upside down (boot splash, console and desktop); panels not stacked | kernel panel-orientation parameter + Hyprland monitor layout | `boot/zenbook-duo-panel-orientation.conf`, `hypr/monitors.lua` |
 | Bottom screen stays on under the docked keyboard | dock/undock watcher | `scripts/zenbook-duo-screen-watch`, `hypr/autostart.lua` |
-| Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2a) | none needed; `scripts/zenbook-duo-firmware-baseline`, `reference/` for comparison |
+| Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2a) | none |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
@@ -82,9 +83,6 @@ is upright; splash and console stay flipped.
 From `hypr/monitors.lua` (goes in `~/.config/hypr/monitors.lua`):
 
 ```lua
--- Zenbook Duo: top panel rotation comes from the kernel (panel_orientation), no transform here.
--- Bottom panel sits physically below the top one (logical size 1440x900 at scale 2).
--- zenbook-duo-screen-watch disables eDP-2 while the pogo-pin keyboard is docked.
 hl.monitor({ output = "eDP-1", mode = "preferred", position = "0x0", scale = omarchy_monitor_scale })
 hl.monitor({ output = "eDP-2", mode = "preferred", position = "0x900", scale = omarchy_monitor_scale })
 ```
@@ -133,12 +131,14 @@ the keyboard away. `scripts/zenbook-duo-screen-watch` does this:
 - Debounces the pogo-contact bounce (two consistent reads 1 s apart) and
   fires a DPMS enable after re-enabling, since a reload alone doesn't always
   power the panel back up.
+- Runs as a single instance (a lock file), because Hyprland can start
+  autostart entries more than once and two watchers racing the same modeset
+  is exactly what the display driver does not survive.
 
 Install to `~/.config/zenbook/` and start it from
 `~/.config/hypr/autostart.lua`:
 
 ```lua
--- Zenbook Duo: toggle bottom screen when the pogo-pin keyboard docks/undocks.
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watch")
 ```
 
@@ -185,28 +185,17 @@ parameters, same scripts):
 | docked | 9 (cold and warm, before and after a BIOS defaults reset) | PHY B failed every time |
 | off the laptop | 4 (two on Sept 1, two on Sept 7) | clean, zero xe errors, up to three dock cycles each |
 
-Things ruled out on the way, kept here so nobody repeats them: a warm reboot
-versus a full power-off (both fail when docked at power-on), the USB-C
-charger, `xe.enable_dc=0`, package updates, the BIOS version, and eDP Panel
-Replay (`xe.enable_panel_replay=0` left the failure in place; it is still
-shipped in `boot/`, harmless, and can be dropped). An earlier version of this
-guide blamed embedded-controller state after a deep battery drain and
-credited a BIOS defaults reset with the fix. It "worked" only because the
-keyboard happened to be off during that boot; the next docked power-on
-failed again. `scripts/zenbook-duo-firmware-baseline` and `reference/` stay
-as a snapshot of a healthy machine for comparison.
+Ruled out on the way, so nobody repeats them: a warm reboot versus a full
+power-off (both fail when docked at power-on), the USB-C charger, a BIOS
+defaults reset, `xe.enable_dc=0`, `xe.enable_panel_replay=0`, package
+updates, and the BIOS version. Keeping eDP-2 enabled and merely dark while
+docked does not help either: Hyprland's first modeset at login already hits
+the same PHY.
 
 This is a driver limitation, reported upstream as
-[drm/xe issue 9196](https://gitlab.freedesktop.org/drm/xe/kernel/-/issues/9196) (the report and both kernel logs are also in
-`reference/xe-bug-report/`). Until it is fixed, the watcher's
-disable mode is fine as long as the power-on rule is followed. A no-modeset
-workaround (keep eDP-2 enabled, backlight 0, parked out of cursor reach)
-lives in the git history; it did not help either, because Hyprland's first
-modeset at login already hits the same PHY.
-
-Also relevant: `zenbook-duo-screen-watch` takes a lock, because Hyprland can
-start it twice (once per autostart pass), and two watchers racing the same
-modeset made the failure look random.
+[drm/xe issue 9196](https://gitlab.freedesktop.org/drm/xe/kernel/-/issues/9196);
+the report and both kernel logs are in `reference/xe-bug-report/`. Until it
+is fixed, the watcher is fine as long as the power-on rule is followed.
 
 ## 3. Brightness
 
@@ -296,7 +285,7 @@ to its panel explicitly. From `hypr/input.lua` (goes in
 -- Bottom panel touchscreen + stylus (i2c-hid, RAYD0002).
 hl.device({ name = "rayd0002:00-2386:8c06", output = "eDP-2" })
 hl.device({ name = "rayd0002:00-2386:8c06-stylus", output = "eDP-2" })
--- Top panel touchscreen + stylus (i2c-hid, RAYD0001; native raydium_i2c_ts
+-- Top panel touchscreen + stylus (i2c-hid, RAYD0001; the native raydium_i2c_ts
 -- driver is blacklisted in /etc/modprobe.d/zenbook-duo-touchscreen.conf).
 hl.device({ name = "rayd0001:00-2386:8c05", output = "eDP-1" })
 hl.device({ name = "rayd0001:00-2386:8c05-stylus", output = "eDP-1" })
@@ -486,8 +475,6 @@ The working machine also boots with these parameters (drop-ins in
   `monitors.lua` shipped here; see section 1a.
 - `xe.enable_dpcd_backlight=1` — **required** for brightness control at all
   on these OLED panels; see section 3a.
-- `xe.enable_panel_replay=0` — kept from the section 2a investigation; it
-  was not the fix and can be dropped.
 - `xe.enable_psr=0` — disables Panel Self Refresh on the Intel Xe driver,
   a common cure for flicker/artifacts on eDP panels.
 - `rtc_cmos.use_acpi_alarm=1` — makes RTC wake alarms go through ACPI.
@@ -505,8 +492,6 @@ cat /proc/asound/cards             # one real card
 hyprctl monitors                   # eDP-1 transform 0 @ 0x0 (upright), eDP-2 @ 0x900
 grep -o 'panel_orientation=[a-z_]*' /proc/cmdline   # upside_down
 grep -o 'enable_dpcd_backlight=[0-9]' /proc/cmdline # 1
-grep -o 'enable_panel_replay=[0-9]' /proc/cmdline   # 0
-sudo grep "PSR mode" /sys/kernel/debug/dri/0/eDP-1/i915_psr_status   # disabled
 brightnessctl set 30%; sleep 2; brightnessctl set 60%  # top panel visibly dims/brightens
 bluetoothctl devices Paired | grep 'Zenbook Duo Keyboard'   # exactly one entry
 ls /sys/class/leds | grep kbd_backlight   # asus::kbd_backlight once the keyboard is docked/connected
@@ -517,14 +502,18 @@ journalctl -k -b | grep -i ghost   # "ignoring unattached firmware ghost" (pre-7
 ```
 
 Power on with the keyboard off the laptop and dock it only once the
-unlock prompt is on both screens (section 2a). Dock the keyboard: bottom
-screen should blank within ~2 s and return when undocked, with no
-`PHY B` lines in `journalctl -k -b`. Undock it and press a key: it should type over Bluetooth within a
-few seconds (if not, section 6b). Brightness, keyboard backlight and mic
-mute keys should work both docked and detached (section 6c). Touch each screen: the cursor must react on the screen you touched.
-Change brightness: both panels should follow. Reboot/shutdown should complete
-without hanging at the splash, and the Omarchy splash itself should be
-upright on both panels.
+unlock prompt is on both screens (section 2a). Then:
+
+- Dock the keyboard: the bottom screen blanks within ~2 s and returns when
+  undocked, with no `PHY B` lines in `journalctl -k -b`.
+- Undock and press a key: it types over Bluetooth within a few seconds (if
+  not, section 6b).
+- Brightness, keyboard backlight and mic mute keys work docked and detached
+  (section 6c).
+- Touch each screen: the cursor reacts on the screen you touched.
+- Change brightness: both panels follow.
+- Reboot and shutdown complete without hanging at the splash, and the
+  splash is upright on both panels.
 
 ## License
 

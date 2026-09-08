@@ -25,13 +25,11 @@ echo "==> Touchscreen: blacklisting raydium_i2c_ts (also fixes shutdown hang)"
 pkexec install -D -m 0644 "$HERE/touchscreen/zenbook-duo-touchscreen.conf" \
   /etc/modprobe.d/zenbook-duo-touchscreen.conf
 
-echo "==> Boot: kernel parameters (panel orientation, DPCD backlight, Panel Replay off)"
+echo "==> Boot: kernel parameters (panel orientation, DPCD backlight)"
 pkexec bash -c "install -D -m 0644 '$HERE/boot/zenbook-duo-panel-orientation.conf' \
   /etc/limine-entry-tool.d/zenbook-duo-panel-orientation.conf && \
   install -D -m 0644 '$HERE/boot/zenbook-duo-dpcd-backlight.conf' \
-  /etc/limine-entry-tool.d/zenbook-duo-dpcd-backlight.conf && \
-  install -D -m 0644 '$HERE/boot/zenbook-duo-panel-replay.conf' \
-  /etc/limine-entry-tool.d/zenbook-duo-panel-replay.conf && limine-update"
+  /etc/limine-entry-tool.d/zenbook-duo-dpcd-backlight.conf && limine-update"
 
 echo "==> Helper scripts -> ~/.config/zenbook/"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-screen-watch" \
@@ -46,19 +44,15 @@ pkexec bash "$HERE/audio/install-audio-fix.sh"
 
 cat <<'EOF'
 
-Almost done. The Hyprland pieces are NOT copied automatically because
-~/.config/hypr/*.lua are your own configs. Merge the marked "Zenbook Duo"
-blocks from this package into yours:
+Almost done. The Hyprland pieces are not copied automatically, because
+~/.config/hypr/*.lua are your own configs. Merge the "Zenbook Duo" blocks
+from this package into yours (on a fresh Omarchy install, copying the three
+files over is fine):
 
-  hypr/monitors.lua   -> ~/.config/hypr/monitors.lua   (orientation/layout)
-  hypr/input.lua      -> ~/.config/hypr/input.lua      (touch->panel mapping)
+  hypr/monitors.lua   -> ~/.config/hypr/monitors.lua   (layout)
+  hypr/input.lua      -> ~/.config/hypr/input.lua      (touch mapping, software cursor)
   hypr/autostart.lua  -> ~/.config/hypr/autostart.lua  (start the two helpers)
 
-(On a fresh Omarchy install you can simply copy all three files over.)
-
-Then reboot. Verify afterwards with:
-  wpctl status            # real Speaker sink, not "Dummy Output"
-  hyprctl monitors        # eDP-1 transform 0 at 0x0 (kernel rotates it), eDP-2 at 0x900
-  cat /proc/cmdline       # contains video=eDP-1:panel_orientation=upside_down xe.enable_dpcd_backlight=1 xe.enable_panel_replay=0
-  brightnessctl set 30%   # top screen visibly dims (OLED brightness goes over DPCD)
+Then power off, lift the keyboard off, and power on (README section 2a).
+Verification steps are in README section 8.
 EOF
