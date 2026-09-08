@@ -12,11 +12,12 @@ binary referenced here ships in this directory, ready to copy.
 > on. Power off completely, lift the keyboard off, power on, and dock it only
 > once the disk-unlock prompt is showing on *both* screens (the bottom one
 > lights first). A reboot does not help while the keyboard is docked. Details
-> and the evidence in section 2a.
+> and the evidence in section 2b. (A top screen that goes dark right after
+> login is a different problem, section 2a.)
 
 **Quick start:** `bash setup.sh` (it asks before appending its three blocks to
 your Hyprland config), power off, and power on with the keyboard lifted off
-(section 2a).
+(section 2b).
 The sections below explain each fix so you can tell whether a newer
 kernel/Omarchy has made one obsolete.
 
@@ -24,7 +25,8 @@ kernel/Omarchy has made one obsolete.
 |---|---|---|
 | Top screen upside down (boot splash, console and desktop); panels not stacked | kernel panel-orientation parameter + Hyprland monitor layout | `boot/zenbook-duo-panel-orientation.conf`, `hypr/monitors.lua` |
 | Bottom screen stays on under the docked keyboard | dock/undock watcher | `scripts/zenbook-duo-screen-watch`, `hypr/autostart.lua` |
-| Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2a) | none |
+| Top screen goes dark right after login and the machine hangs; kernel log starts with a burst of `PSR Idle` timeouts | Panel Replay off (section 2a) | `boot/zenbook-duo-panel-replay.conf` |
+| Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2b) | none |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
@@ -146,7 +148,34 @@ start line to `~/.config/hypr/autostart.lua`:
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watch")
 ```
 
-### 2a. Bottom screen never comes back after undocking (and the machine freezes)
+### 2a. Top screen goes dark after login, machine hangs (Panel Replay)
+
+Symptom, on some boots: the disk-unlock prompt and login work, then the top
+screen goes dark within seconds and nothing responds; power-cycle. The
+kernel log starts with a burst of
+
+```
+xe … *ERROR* Timed out waiting for PSR Idle for re-enable      (hundreds, in the first seconds)
+xe … Selective fetch area calculation failed in pipe A
+```
+
+followed by `flip_done timed out` on pipe A and "Failed to bring PHY A to
+idle". Both OLED panels advertise **eDP Panel Replay** (the successor of
+PSR), the xe driver enables it on `eDP-1` by default, and `xe.enable_psr=0`
+does *not* cover it. When the panel fails to report PSR idle at boot, the
+first modesets (Hyprland starting, the dock watcher disabling `eDP-2`)
+wedge the top panel's pipe. `boot/zenbook-duo-panel-replay.conf` adds
+
+```
+xe.enable_panel_replay=0
+```
+
+(installed by `setup.sh` like the other drop-ins; `sudo limine-update`,
+reboot). Cost: a little idle power on `eDP-1`, the same trade as
+`enable_psr=0`. Across two weeks of boots here, none with the parameter
+showed the burst; without it, roughly every other boot did.
+
+### 2b. Bottom screen never comes back after undocking (and the machine freezes)
 
 Symptom: lift the keyboard, the bottom screen stays black, and the top screen
 and keyboard freeze for ten seconds or more, sometimes for good. Docking again
@@ -191,8 +220,9 @@ parameters, same scripts):
 
 Ruled out on the way, so nobody repeats them: a warm reboot versus a full
 power-off (both fail when docked at power-on), the USB-C charger, a BIOS
-defaults reset, `xe.enable_dc=0`, `xe.enable_panel_replay=0`, package
-updates, and the BIOS version. Keeping eDP-2 enabled and merely dark while
+defaults reset, `xe.enable_dc=0`, package updates, and the BIOS version.
+Panel Replay (2a) is a separate problem: turning it off does not change
+this one. Keeping eDP-2 enabled and merely dark while
 docked does not help either: Hyprland's first modeset at login already hits
 the same PHY.
 
@@ -479,6 +509,8 @@ The working machine also boots with these parameters (drop-ins in
   `monitors.lua` shipped here; see section 1a.
 - `xe.enable_dpcd_backlight=1` — **required** for brightness control at all
   on these OLED panels; see section 3a.
+- `xe.enable_panel_replay=0` — **required** or some boots hang with a dark
+  top screen; see section 2a.
 - `xe.enable_psr=0` — disables Panel Self Refresh on the Intel Xe driver,
   a common cure for flicker/artifacts on eDP panels.
 - `rtc_cmos.use_acpi_alarm=1` — makes RTC wake alarms go through ACPI.
@@ -496,6 +528,8 @@ cat /proc/asound/cards             # one real card
 hyprctl monitors                   # eDP-1 transform 0 @ 0x0 (upright), eDP-2 @ 0x900
 grep -o 'panel_orientation=[a-z_]*' /proc/cmdline   # upside_down
 grep -o 'enable_dpcd_backlight=[0-9]' /proc/cmdline # 1
+grep -o 'enable_panel_replay=[0-9]' /proc/cmdline   # 0
+journalctl -k -b | grep -c 'PSR Idle for re-enable'  # 0
 brightnessctl set 30%; sleep 2; brightnessctl set 60%  # top panel visibly dims/brightens
 bluetoothctl devices Paired | grep 'Zenbook Duo Keyboard'   # exactly one entry
 ls /sys/class/leds | grep kbd_backlight   # asus::kbd_backlight once the keyboard is docked/connected
@@ -506,7 +540,7 @@ journalctl -k -b | grep -i ghost   # "ignoring unattached firmware ghost" (pre-7
 ```
 
 Power on with the keyboard off the laptop and dock it only once the
-unlock prompt is on both screens (section 2a). Then:
+unlock prompt is on both screens (section 2b). Then:
 
 - Dock the keyboard: the bottom screen blanks within ~2 s and returns when
   undocked, with no `PHY B` lines in `journalctl -k -b`.
