@@ -1,0 +1,12 @@
+[Unit]
+Description=Zenbook Duo: hand the bottom panel (eDP-2) to the compositor after boot
+After=display-manager.service
+
+[Service]
+Type=oneshot
+# Wait for Hyprland so the re-detect lands as a hotplug in the compositor,
+# not in the console. The connector was forced off with video=eDP-2:d.
+ExecStart=/bin/sh -c 'for i in $(seq 60); do pgrep -x Hyprland >/dev/null && break; sleep 1; done; sleep 2; for s in /sys/class/drm/card*-eDP-2/status; do echo detect > "$s"; done'
+
+[Install]
+WantedBy=graphical.target

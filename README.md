@@ -26,7 +26,7 @@ kernel/Omarchy has made one obsolete.
 | Top screen upside down (boot splash, console and desktop); panels not stacked | kernel panel-orientation parameter + Hyprland monitor layout | `boot/zenbook-duo-panel-orientation.conf`, `hypr/monitors.lua` |
 | Bottom screen stays on under the docked keyboard | dock/undock watcher | `scripts/zenbook-duo-screen-watch`, `hypr/autostart.lua` |
 | Top screen goes dark right after login and the machine hangs; kernel log starts with a burst of `PSR Idle` timeouts | Panel Replay off (section 2a) | `boot/zenbook-duo-panel-replay.conf` |
-| Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2b) | none |
+| Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop; keep the kernel off the bottom panel until login (section 2b) | `boot/zenbook-duo-bottom-panel-boot.conf`, `udev/zenbook-duo-bottom-panel.service` |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
@@ -207,17 +207,32 @@ handshake fails and the port is wedged for the rest of that boot. If the
 firmware did light the panel, the kernel inherits a working PHY and can
 power it down and up as often as the dock watcher asks.
 
-**The rule:** power on with the keyboard lifted off. Wait for the disk-unlock
-prompt to appear on both screens (the bottom one comes up first), then dock
-the keyboard and type. From then on dock and undock freely, but not while
-the machine is shutting down or rebooting. Once the port is wedged, every
-display update that touches it blocks the compositor for a ten-second
-kernel timeout, which is the "dead keyboard" after each dock event and the
-slow shutdown, and the wedge survives a warm reboot: the firmware cannot
-light the panel either, so the prompt appears on the top screen only even
-with the keyboard off. That dark bottom screen at the prompt is the tell.
-Whenever you see it, power off completely, wait a few seconds, and power on
-again with the keyboard off; a reboot only carries the wedge forward. The
+**The rule:** power on with the keyboard lifted off, so the firmware lights
+the bottom panel, then dock the keyboard at the disk-unlock prompt and type.
+From then on dock and undock freely, but not while the machine is shutting
+down or rebooting.
+
+Docking at the prompt has a second trap: the dock switches the bottom panel
+off while the boot splash is still drawing on it, and the driver does not
+survive that either (it wedged one boot in two here, with the identical
+"AUX B … Failed to write aux backlight level" two seconds after the splash
+started). So the kernel is kept off that panel until login:
+`boot/zenbook-duo-bottom-panel-boot.conf` adds `video=eDP-2:d`, which forces
+the connector off from the start (splash and console use the top screen
+only, which is the one you can see anyway), and
+`udev/zenbook-duo-bottom-panel.service` writes `detect` to the connector
+once Hyprland is running, so it arrives as an ordinary hotplug and the dock
+watcher takes it from there. The firmware still initialises the PHY at
+power-on, which is the part that matters; the kernel just never drives the
+panel while you are docking.
+
+Once the port is wedged, every display update that touches it blocks the
+compositor for a ten-second kernel timeout, which is the "dead keyboard"
+after each dock event and the slow shutdown, and the wedge survives a warm
+reboot: the firmware cannot light the panel either. The dock watcher
+notices the failure in the kernel log and sends one notification. Whenever
+you see it, power off completely, wait a few seconds, and power on again
+with the keyboard off; a reboot only carries the wedge forward. The
 dock watcher notices the same thing from the kernel log and, rather than
 freezing the machine on every dock event, keeps the panel disabled for that
 boot and tells you to power off.
@@ -523,6 +538,9 @@ The working machine also boots with these parameters (drop-ins in
   on these OLED panels; see section 3a.
 - `xe.enable_panel_replay=0` — **required** or some boots hang with a dark
   top screen; see section 2a.
+- `video=eDP-2:d` — keeps the kernel off the bottom panel during boot;
+  `zenbook-duo-bottom-panel.service` re-detects it after login. See
+  section 2b.
 - `xe.enable_psr=0` — disables Panel Self Refresh on the Intel Xe driver,
   a common cure for flicker/artifacts on eDP panels.
 - `rtc_cmos.use_acpi_alarm=1` — makes RTC wake alarms go through ACPI.
@@ -541,6 +559,8 @@ hyprctl monitors                   # eDP-1 transform 0 @ 0x0 (upright), eDP-2 @ 
 grep -o 'panel_orientation=[a-z_]*' /proc/cmdline   # upside_down
 grep -o 'enable_dpcd_backlight=[0-9]' /proc/cmdline # 1
 grep -o 'enable_panel_replay=[0-9]' /proc/cmdline   # 0
+grep -o 'video=eDP-2:d' /proc/cmdline               # present
+systemctl is-active zenbook-duo-bottom-panel       # inactive (oneshot, ran once after login)
 journalctl -k -b | grep -c 'PSR Idle for re-enable'  # 0
 brightnessctl set 30%; sleep 2; brightnessctl set 60%  # top panel visibly dims/brightens
 bluetoothctl devices Paired | grep 'Zenbook Duo Keyboard'   # exactly one entry
@@ -563,7 +583,8 @@ unlock prompt is on both screens (section 2b). Then:
 - Touch each screen: the cursor reacts on the screen you touched.
 - Change brightness: both panels follow.
 - Reboot and shutdown complete without hanging at the splash, and the
-  splash is upright on both panels.
+  splash is upright on the top panel (the bottom one stays off until
+  login, section 2b).
 
 ## License
 
