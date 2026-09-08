@@ -84,7 +84,7 @@ for f in monitors input autostart; do
 done
 
 echo
-echo "Done. Power off, lift the keyboard off the laptop, and power on (README section 2a)."
+echo "Done. Power off, lift the keyboard off the laptop, and power on (README section 2b)."
 echo "Verification steps are in README section 8."
 if (( ${#skipped[@]} )); then
   echo "Skipped Hyprland blocks, to merge by hand from hypr/: ${skipped[*]}"
