@@ -1,8 +1,9 @@
 # Firmware baseline, healthy machine, 2026-09-07
 
-Taken with `scripts/zenbook-duo-firmware-baseline` right after the firmware
-defaults reset that fixed the dark bottom panel (README section 2a), with
-both panels working. Use it to diff against a snapshot taken while the
+Taken with `scripts/zenbook-duo-firmware-baseline` on a healthy boot, with
+both panels working, right after a firmware defaults reset. (That reset was
+later shown not to matter for the dark-bottom-panel problem, see README
+section 2a; the snapshot is still a valid picture of a working machine.) Use it to diff against a snapshot taken while the
 panel is misbehaving.
 
 | File | What |

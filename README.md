@@ -5,16 +5,14 @@ Everything needed to make a 2026 Zenbook Duo UX8407AA fully work under
 machine working in September 2026 on kernel `7.1.9-arch1-2`. Every config and
 binary referenced here ships in this directory, ready to copy.
 
-> **If the bottom screen suddenly died after the battery ran completely flat:**
-> stop, do not debug Linux. Boot into firmware setup (`F2`, or
-> `systemctl reboot --firmware-setup`), **load setup defaults**, re-disable
-> Secure Boot, leave the storage mode alone, check Limine is still first,
-> and reboot. That is the whole fix. The full drain corrupts embedded-controller
-> state that only a defaults reset clears; the symptoms are a black bottom
-> panel that the driver still believes is on, `PHY B failed to request refclk`
-> in the kernel log, and hard hangs on undock. Details in section 2a. While
-> the machine is healthy, run `scripts/zenbook-duo-firmware-baseline` once so
-> you have something to diff against (`reference/` holds ours).
+> **If the bottom screen stays black after undocking, the keyboard goes dead
+> for ten seconds after each dock event, or shutdown sits on a blank screen
+> for a minute:** the bottom panel's display PHY was never initialised by the
+> firmware, because the keyboard was sitting on it when the machine powered
+> on. Power off completely, lift the keyboard off, power on, and dock it only
+> once the disk-unlock prompt is showing on *both* screens (the bottom one
+> lights first). A reboot does not help while the keyboard is docked. Details
+> and the evidence in section 2a.
 
 **Quick start:** `bash setup.sh`, merge the three Hyprland snippets it points
 you at, reboot. The sections below explain each fix so you can tell whether a
@@ -24,7 +22,7 @@ newer kernel/Omarchy has made one obsolete.
 |---|---|---|
 | Top screen upside down (boot splash, console and desktop); panels not stacked | kernel panel-orientation parameter + Hyprland monitor layout | `boot/zenbook-duo-panel-orientation.conf`, `hypr/monitors.lua` |
 | Bottom screen stays on under the docked keyboard | dock/undock watcher | `scripts/zenbook-duo-screen-watch`, `hypr/autostart.lua` |
-| Undocking (or booting docked) hard-hangs the machine; bottom screen dark even though "on" | firmware defaults reset after a deep battery drain (section 2a); Panel Replay off | `boot/zenbook-duo-panel-replay.conf`, `scripts/zenbook-duo-firmware-baseline`, `reference/` |
+| Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2a) | none needed; `scripts/zenbook-duo-firmware-baseline`, `reference/` for comparison |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
@@ -144,63 +142,70 @@ Install to `~/.config/zenbook/` and start it from
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watch")
 ```
 
-### 2a. Undocking hangs the whole machine
+### 2a. Bottom screen never comes back after undocking (and the machine freezes)
 
-Symptom: lift the keyboard, the bottom screen stays black, the top screen
-freezes within seconds, and the box is dead — not even a USB keyboard works;
-power-cycle. In the kernel log the sequence is always the same, starting on
-the *top* panel's pipe:
+Symptom: lift the keyboard, the bottom screen stays black, and the top screen
+and keyboard freeze for ten seconds or more, sometimes for good. Docking again
+"works" after a similar pause. Shutdown then sits on a blank screen with the
+power light on for about a minute (hold the power button). The kernel log has
+the same sequence every time, about two seconds after USB sees the keyboard
+leave:
 
 ```
-xe … *ERROR* Timed out waiting PSR idle state
-xe … *ERROR* [CRTC:151:pipe A] flip_done timed out
-xe … PHY B failed to request refclk / PLL not locked
-xe … *ERROR* [CONNECTOR:521:eDP-2] Failed to enable link training
+xe … PHY B failed to request refclk
+xe … PHY B failed to change powerdown state
+xe … *ERROR* Failed to bring PHY B to idle.
+xe … *ERROR* [CONNECTOR:521:eDP-2][ENCODER:520:DDI B/PHY B][DPRX] Failed to enable link training
+xe … *ERROR* [CRTC:270:pipe B] flip_done timed out          (then every 10 s)
 ```
 
-**Resolved (2026-09-07): it was firmware/EC state, not software.** The
-laptop had been fully drained flat and recharged between the good day and
-the bad days. After that, every modeset on the bottom panel failed at the
-PHY ("PHY B failed to request refclk"), its AUX channel timed out, and the
-panel stayed black even though the driver believed it was scanning out —
-while the firmware could still light it at the disk-unlock prompt. **Loading
-setup defaults in the BIOS** (F2, or `systemctl reboot --firmware-setup`;
-keep Secure Boot off and the storage mode unchanged, check Limine stays the
-first boot entry) brought it back: next boot, zero display errors and the
-panel's AUX channel answered again. So: after a deep battery drain, if the
-bottom panel goes dark and the log fills with PHY B errors, reset the
-firmware to defaults before touching anything in Linux.
+**Cause: the firmware only initialises the bottom panel's PHY when the
+keyboard is off the laptop at power-on.** With the keyboard docked, the
+firmware never lights the covered panel, and the xe driver on 7.1.9 cannot
+bring that PHY (PHY B, DDI B) up from scratch on its own: the first time it
+has to power the panel back on after Hyprland disabled it, the refclk
+handshake fails and the port is wedged for the rest of that boot. If the
+firmware did light the panel, the kernel inherits a working PHY and can
+power it down and up as often as the dock watcher asks.
 
-Things ruled out on the way, kept here so nobody repeats them: Panel Replay
-alone (disabling it, below, left the failure in place), the USB-C charger
-(failed on battery too), display C-states (`xe.enable_dc=0` changed nothing:
-the boot-time disable still hit "pipe_off wait timed out" and the PHY B
-failures), package updates (none between the good and bad days), and the
-BIOS version (unchanged). What is certain: the xe driver on
-7.1.9 cannot reliably bring PHY B back up after the pipe was disabled
-("PHY B failed to request refclk"), and once that happens the next commit
-wedges the display engine. Both mitigations below are kept.
+**The rule:** power on with the keyboard lifted off. Wait for the disk-unlock
+prompt to appear on both screens (the bottom one comes up first), then dock
+the keyboard and type. From then on dock and undock freely. If you ever
+powered on docked, a reboot will not fix it, because the firmware skips the
+panel again; do a full power-off first. Once the port is wedged, every
+display update that touches it blocks the compositor for a ten-second
+kernel timeout, which is the "dead keyboard" after each dock event and the
+slow shutdown.
 
-One contributing factor was **eDP Panel Replay** (the successor of PSR) on eDP-1. Both OLED
-panels advertise it and the xe driver turns it on by default
-(`xe.enable_panel_replay=-1`). `xe.enable_psr=0` does *not* cover it —
-Panel Replay has its own switch — and `/sys/kernel/debug/dri/0/eDP-1/i915_psr_status`
-shows "Panel Replay Selective Update enabled" regardless. When the dock
-watcher's reload re-enables eDP-2, the atomic commit first has to wake eDP-1
-out of Panel Replay; that wait times out, the display engine wedges, and the
-bring-up of PHY B then fails until reboot. The same can happen at boot with
-the keyboard docked, when the disable of eDP-2 is the first modeset.
+Evidence, from one day of boots on identical software (same kernel, same
+parameters, same scripts):
 
-`boot/zenbook-duo-panel-replay.conf` adds `xe.enable_panel_replay=0` (drop-in
-for `limine-entry-tool`, installed by `setup.sh`; `sudo limine-update` and
-reboot). Cost: a little idle power on eDP-1, the same trade as `enable_psr=0`.
+| Keyboard at power-on | Boots | First undock after login |
+|---|---|---|
+| docked | 9 (cold and warm, before and after a BIOS defaults reset) | PHY B failed every time |
+| off the laptop | 4 (two on Sept 1, two on Sept 7) | clean, zero xe errors, up to three dock cycles each |
+
+Things ruled out on the way, kept here so nobody repeats them: a warm reboot
+versus a full power-off (both fail when docked at power-on), the USB-C
+charger, `xe.enable_dc=0`, package updates, the BIOS version, and eDP Panel
+Replay (`xe.enable_panel_replay=0` left the failure in place; it is still
+shipped in `boot/`, harmless, and can be dropped). An earlier version of this
+guide blamed embedded-controller state after a deep battery drain and
+credited a BIOS defaults reset with the fix. It "worked" only because the
+keyboard happened to be off during that boot; the next docked power-on
+failed again. `scripts/zenbook-duo-firmware-baseline` and `reference/` stay
+as a snapshot of a healthy machine for comparison.
+
+This is a driver limitation worth reporting to drm/xe: an eDP port that the
+firmware left uninitialised cannot be brought up. Until then, the watcher's
+disable mode is fine as long as the power-on rule is followed. A no-modeset
+workaround (keep eDP-2 enabled, backlight 0, parked out of cursor reach)
+lives in the git history; it did not help either, because Hyprland's first
+modeset at login already hits the same PHY.
 
 Also relevant: `zenbook-duo-screen-watch` takes a lock, because Hyprland can
-start it twice (once per autostart pass) and two watchers racing the same
-modeset made the failure far more likely. While the panel was wedged, a
-no-modeset workaround (keep eDP-2 enabled, backlight 0, park it out of
-cursor reach) kept the machine usable; it was removed once the firmware
-reset fixed the real problem, and lives in the git history if ever needed.
+start it twice (once per autostart pass), and two watchers racing the same
+modeset made the failure look random.
 
 ## 3. Brightness
 
@@ -480,8 +485,8 @@ The working machine also boots with these parameters (drop-ins in
   `monitors.lua` shipped here; see section 1a.
 - `xe.enable_dpcd_backlight=1` — **required** for brightness control at all
   on these OLED panels; see section 3a.
-- `xe.enable_panel_replay=0` — **required** or undocking hard-hangs the
-  machine; see section 2a.
+- `xe.enable_panel_replay=0` — kept from the section 2a investigation; it
+  was not the fix and can be dropped.
 - `xe.enable_psr=0` — disables Panel Self Refresh on the Intel Xe driver,
   a common cure for flicker/artifacts on eDP panels.
 - `rtc_cmos.use_acpi_alarm=1` — makes RTC wake alarms go through ACPI.
@@ -510,8 +515,10 @@ hyprctl getoption cursor:no_hardware_cursors   # int: 1
 journalctl -k -b | grep -i ghost   # "ignoring unattached firmware ghost" (pre-7.2 kernels)
 ```
 
-Dock the keyboard: bottom screen should blank within ~2 s and return when
-undocked. Undock it and press a key: it should type over Bluetooth within a
+Power on with the keyboard off the laptop and dock it only once the
+unlock prompt is on both screens (section 2a). Dock the keyboard: bottom
+screen should blank within ~2 s and return when undocked, with no
+`PHY B` lines in `journalctl -k -b`. Undock it and press a key: it should type over Bluetooth within a
 few seconds (if not, section 6b). Brightness, keyboard backlight and mic
 mute keys should work both docked and detached (section 6c). Touch each screen: the cursor must react on the screen you touched.
 Change brightness: both panels should follow. Reboot/shutdown should complete

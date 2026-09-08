@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Zenbook Duo: snapshot the firmware-side state that Linux can see, so that a
-# later incident (e.g. the bottom panel going dark after a full battery
-# drain, README section 2a) can be diffed against a known-good machine.
+# later incident (e.g. the bottom panel refusing to come back, README section
+# 2a) can be diffed against a known-good machine.
 #
 # usage: zenbook-duo-firmware-baseline [output-dir]
 #        default: ~/.local/state/zenbook/firmware-baseline-YYYYMMDD
