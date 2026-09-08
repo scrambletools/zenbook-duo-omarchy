@@ -14,8 +14,9 @@ binary referenced here ships in this directory, ready to copy.
 > lights first). A reboot does not help while the keyboard is docked. Details
 > and the evidence in section 2a.
 
-**Quick start:** `bash setup.sh`, merge the three Hyprland snippets it points
-you at, power off, and power on with the keyboard lifted off (section 2a).
+**Quick start:** `bash setup.sh` (it asks before appending its three blocks to
+your Hyprland config), power off, and power on with the keyboard lifted off
+(section 2a).
 The sections below explain each fix so you can tell whether a newer
 kernel/Omarchy has made one obsolete.
 
@@ -80,11 +81,14 @@ is upright; splash and console stay flipped.
 
 ### 1b. Layout
 
-From `hypr/monitors.lua` (goes in `~/.config/hypr/monitors.lua`):
+From `hypr/monitors.lua`, which `setup.sh` offers to append to
+`~/.config/hypr/monitors.lua` (after Omarchy's catch-all monitor rule, so
+these win):
 
 ```lua
-hl.monitor({ output = "eDP-1", mode = "preferred", position = "0x0", scale = omarchy_monitor_scale })
-hl.monitor({ output = "eDP-2", mode = "preferred", position = "0x900", scale = omarchy_monitor_scale })
+local zenbook_duo_scale = omarchy_monitor_scale or 2
+hl.monitor({ output = "eDP-1", mode = "preferred", position = "0x0", scale = zenbook_duo_scale })
+hl.monitor({ output = "eDP-2", mode = "preferred", position = "0x900", scale = zenbook_duo_scale })
 ```
 
 Verify with `hyprctl monitors`: eDP-1 at `0x0` with transform 0 and the
@@ -135,8 +139,8 @@ the keyboard away. `scripts/zenbook-duo-screen-watch` does this:
   autostart entries more than once and two watchers racing the same modeset
   is exactly what the display driver does not survive.
 
-Install to `~/.config/zenbook/` and start it from
-`~/.config/hypr/autostart.lua`:
+`setup.sh` installs it to `~/.config/zenbook/` and offers to append the
+start line to `~/.config/hypr/autostart.lua`:
 
 ```lua
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watch")
@@ -278,8 +282,8 @@ and the panel (and pen) just work. If a future kernel fixes
 
 Two identical internal touchscreens confuse Hyprland's auto-mapping —
 touching the bottom screen moved the cursor on the top one. Bind each device
-to its panel explicitly. From `hypr/input.lua` (goes in
-`~/.config/hypr/input.lua`):
+to its panel explicitly. From `hypr/input.lua`, which `setup.sh` offers to
+append to `~/.config/hypr/input.lua`:
 
 ```lua
 -- Bottom panel touchscreen + stylus (i2c-hid, RAYD0002).
@@ -484,7 +488,7 @@ against your own cmdline doesn't surprise you.
 
 ## 8. Post-install verification
 
-After `setup.sh` + config merge + reboot:
+After `setup.sh` and a power cycle:
 
 ```sh
 wpctl status                       # Speaker/Headphone sinks, not Dummy Output
