@@ -140,6 +140,12 @@ the keyboard away. `scripts/zenbook-duo-screen-watch` does this:
 - Runs as a single instance (a lock file), because Hyprland can start
   autostart entries more than once and two watchers racing the same modeset
   is exactly what the display driver does not survive.
+- Leaves the panel disabled if the keyboard comes off while the system is
+  shutting down; re-enabling it then only stalls the shutdown (section 2b).
+- Checks the kernel log after each re-enable and at startup. If the panel's
+  PHY has failed (section 2b), it disables the panel again, leaves it alone
+  for the rest of the boot, and sends one notification telling you to power
+  off fully. Without this, every dock event costs a ten-second freeze.
 
 `setup.sh` installs it to `~/.config/zenbook/` and offers to append the
 start line to `~/.config/hypr/autostart.lua`:
@@ -211,7 +217,10 @@ slow shutdown, and the wedge survives a warm reboot: the firmware cannot
 light the panel either, so the prompt appears on the top screen only even
 with the keyboard off. That dark bottom screen at the prompt is the tell.
 Whenever you see it, power off completely, wait a few seconds, and power on
-again with the keyboard off; a reboot only carries the wedge forward.
+again with the keyboard off; a reboot only carries the wedge forward. The
+dock watcher notices the same thing from the kernel log and, rather than
+freezing the machine on every dock event, keeps the panel disabled for that
+boot and tells you to power off.
 
 Evidence, from one day of boots on identical software (same kernel, same
 parameters, same scripts):

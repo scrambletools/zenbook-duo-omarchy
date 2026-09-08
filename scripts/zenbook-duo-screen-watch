@@ -27,6 +27,10 @@ DISABLE_RULE='hl.monitor({ output = "eDP-2", disabled = true })'
 
 BOTTOM_BL="card0-eDP-2-backlight"
 TOP_BL="/sys/class/backlight/intel_backlight"
+# Set once the bottom panel's PHY is found wedged (README section 2b); the
+# panel is then left disabled for the rest of this boot.
+WEDGED="${XDG_RUNTIME_DIR:-/tmp}/zenbook-duo-screen-watch.wedged"
+WEDGE_PATTERN='PHY B failed|DDI BUF B|pipe B\] flip_done timed out'
 
 top_percent() {
   local cur max
@@ -57,25 +61,66 @@ stable_kb_state() {
   done
 }
 
-apply() {
-  local state=$1 have=absent
-  [[ -f $TOGGLE ]] && have=attached
-  [[ $state == "$have" ]] && return
-  if [[ $state == attached ]]; then
+shutting_down() {
+  [[ $(systemctl is-system-running 2>/dev/null) == stopping ]]
+}
+
+# The xe driver cannot bring the bottom panel's PHY back up when the firmware
+# did not light it at power-on (README section 2b). Once that has failed,
+# every further modeset on that pipe stalls the compositor for 10 s, so stop
+# touching the panel until the next boot and say so once.
+wedged_in_log() {   # [since], default: the whole boot
+  journalctl -k -b -q ${1:+--since "$1"} 2>/dev/null | grep -qE "$WEDGE_PATTERN"
+}
+
+mark_wedged() {
+  : >"$WEDGED"
+  echo "zenbook-duo-screen-watch: bottom panel PHY wedged; leaving eDP-2 disabled until reboot" >&2
+  omarchy-notification-send -u critical "Bottom screen unavailable" \
+    "Its display PHY failed to come back. Power off fully (not reboot) and power on with the keyboard off the laptop." >/dev/null 2>&1 ||
+    notify-send "Bottom screen unavailable" "Power off fully and power on with the keyboard off the laptop." >/dev/null 2>&1
+}
+
+set_toggle() {
+  if [[ $1 == attached ]]; then
     mkdir -p "${TOGGLE%/*}"
     printf '%s\n' "$DISABLE_RULE" >"$TOGGLE"
   else
     rm -f "$TOGGLE"
   fi
   hyprctl reload >/dev/null 2>&1
+}
+
+apply() {
+  local state=$1 have=absent
+  [[ -f $TOGGLE ]] && have=attached
+  [[ $state == "$have" ]] && return
+  if [[ $state == absent ]]; then
+    # Leave the panel off if the system is going down (the re-enable would
+    # stall the shutdown) or if this boot's PHY is already known to be wedged.
+    shutting_down && return
+    [[ -f $WEDGED ]] && return
+  fi
+  set_toggle "$state"
   if [[ $state == absent ]]; then
     # Re-enabling via reload doesn't always power the panel back up
     # (same reason omarchy's clamshell fires dpms after enabling).
     sleep 1
     hyprctl dispatch 'hl.dsp.dpms({ action = "enable", monitor = "eDP-2" })' >/dev/null 2>&1
     brightnessctl --device="$BOTTOM_BL" set "$(top_percent)%" >/dev/null 2>&1
+    sleep 3
+    if wedged_in_log -10s; then
+      set_toggle attached   # one more 10 s stall, then the pipe is left alone
+      mark_wedged
+    fi
   fi
 }
+
+# A boot that started docked, or that inherited a wedged PHY from a warm
+# reboot, already shows the signature in the kernel log.
+if [[ ! -f $WEDGED ]] && wedged_in_log; then
+  mark_wedged
+fi
 
 apply "$(stable_kb_state)"
 
