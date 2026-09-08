@@ -203,12 +203,15 @@ power it down and up as often as the dock watcher asks.
 
 **The rule:** power on with the keyboard lifted off. Wait for the disk-unlock
 prompt to appear on both screens (the bottom one comes up first), then dock
-the keyboard and type. From then on dock and undock freely. If you ever
-powered on docked, a reboot will not fix it, because the firmware skips the
-panel again; do a full power-off first. Once the port is wedged, every
+the keyboard and type. From then on dock and undock freely, but not while
+the machine is shutting down or rebooting. Once the port is wedged, every
 display update that touches it blocks the compositor for a ten-second
 kernel timeout, which is the "dead keyboard" after each dock event and the
-slow shutdown.
+slow shutdown, and the wedge survives a warm reboot: the firmware cannot
+light the panel either, so the prompt appears on the top screen only even
+with the keyboard off. That dark bottom screen at the prompt is the tell.
+Whenever you see it, power off completely, wait a few seconds, and power on
+again with the keyboard off; a reboot only carries the wedge forward.
 
 Evidence, from one day of boots on identical software (same kernel, same
 parameters, same scripts):
