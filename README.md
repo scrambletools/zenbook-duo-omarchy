@@ -7,15 +7,12 @@ binary referenced here ships in this directory, ready to copy.
 
 > **If the bottom screen stays black after undocking, the keyboard goes dead
 > for ten seconds after each dock event, or shutdown sits on a blank screen
-> for a minute:** the bottom panel's display PHY was never initialised by the
-> firmware, because the keyboard was sitting on it when the machine powered
-> on. Power off completely, lift the keyboard off, power on, and dock it only
-> once the disk-unlock prompt is showing on *both* screens (the bottom one
-> lights first). A reboot does not help, and neither does a quick power-off:
-> the bad state survives them. Shut down, unplug the charger, hold the power
-> button for 15 seconds, leave it off for a minute, then power on with the
-> keyboard off. Details and the evidence in section 2b. (A top screen that
-> goes dark right after login is a different problem, section 2a.)
+> for a minute:** the bottom panel's display PHY is wedged. Shut down, unplug
+> the charger, hold the power button for 15 seconds, leave the machine off
+> for a minute, then power on with the keyboard lifted off and dock it at the
+> disk-unlock prompt. A reboot or a quick power-off carries the bad state
+> forward. Details in section 2b. (A top screen that goes dark right after
+> login is a different problem, section 2a.)
 
 **Quick start:** `bash setup.sh` (it asks before appending its three blocks to
 your Hyprland config), power off, and power on with the keyboard lifted off
@@ -143,17 +140,14 @@ the keyboard away. `scripts/zenbook-duo-screen-watch` does this:
   autostart entries more than once and two watchers racing the same modeset
   is exactly what the display driver does not survive.
 - Leaves the panel disabled if the keyboard comes off while the system is
-  shutting down; re-enabling it then only stalls the shutdown (section 2b).
-- Checks the kernel log after each re-enable and at startup. If the panel's
+  shutting down, since re-enabling it then only stalls the shutdown.
+- Checks the kernel log at startup and after each re-enable. If the panel's
   PHY has failed (section 2b), it disables the panel again, leaves it alone
   for the rest of the boot, and sends one critical notification telling you
-  to power off fully. Without this, every dock event costs a ten-second
-  freeze.
-- Retires that notification itself, both when it stops (shutdown included)
-  and again when it starts, and raises a fresh one only if the new boot is
-  wedged too. Omarchy restores critical toasts at the next login, and a
-  warning left over from a boot the power reset has just fixed would be
-  misleading. Only its own message is touched.
+  to do the power reset. Without this, every dock event costs a ten-second
+  freeze. It retires that notification itself when it stops and when it
+  starts (Omarchy restores critical toasts at the next login), so the
+  warning only ever refers to the current boot.
 
 `setup.sh` installs it to `~/.config/zenbook/` and offers to append the
 start line to `~/.config/hypr/autostart.lua`:
@@ -192,11 +186,10 @@ showed the burst; without it, roughly every other boot did.
 ### 2b. Bottom screen never comes back after undocking (and the machine freezes)
 
 Symptom: lift the keyboard, the bottom screen stays black, and the top screen
-and keyboard freeze for ten seconds or more, sometimes for good. Docking again
-"works" after a similar pause. Shutdown then sits on a blank screen with the
-power light on for about a minute (hold the power button). The kernel log has
-the same sequence every time, about two seconds after USB sees the keyboard
-leave:
+and keyboard freeze for ten seconds or more. Docking again "works" after a
+similar pause. Shutdown then sits on a blank screen with the power light on
+for about a minute (hold the power button). The kernel log has the same
+sequence every time, about two seconds after USB sees the keyboard leave:
 
 ```
 xe … PHY B failed to request refclk
@@ -206,64 +199,48 @@ xe … *ERROR* [CONNECTOR:521:eDP-2][ENCODER:520:DDI B/PHY B][DPRX] Failed to en
 xe … *ERROR* [CRTC:270:pipe B] flip_done timed out          (then every 10 s)
 ```
 
-**Cause: the firmware only initialises the bottom panel's PHY when the
-keyboard is off the laptop at power-on.** With the keyboard docked, the
-firmware never lights the covered panel, and the xe driver on 7.1.9 cannot
-bring that PHY (PHY B, DDI B) up from scratch on its own: the first time it
-has to power the panel back on after Hyprland disabled it, the refclk
-handshake fails and the port is wedged for the rest of that boot. If the
-firmware did light the panel, the kernel inherits a working PHY and can
-power it down and up as often as the dock watcher asks.
+**What is going on.** The xe driver on 7.1.9 cannot bring the bottom panel's
+PHY (PHY B, DDI B) up from scratch. It works only when it inherits a PHY the
+firmware initialised at power-on, and the firmware lights the bottom panel
+only when the keyboard is off the laptop at that moment. Once the PHY has
+wedged, every display update that touches it blocks the compositor for a
+ten-second kernel timeout (the "dead keyboard" after each dock event, the
+slow shutdown), and the bad state outlives the boot: a warm reboot and a
+quick power-off both carry it forward, and the next boot then fails by
+itself two seconds after the boot splash starts ("AUX B … Failed to write
+aux backlight level: -110", then pipe B timeouts), keyboard or no keyboard.
+Only a real power reset clears it, so the state is held by something that
+stays powered through a short shutdown (embedded controller or panel), not
+by the SoC.
 
-**The rule:** power on with the keyboard lifted off, so the firmware lights
-the bottom panel, then dock the keyboard at the disk-unlock prompt and type.
-From then on dock and undock freely, but not while the machine is shutting
-down or rebooting.
+**The rules.**
 
-**Recovery.** Once the port has wedged, the bad state outlives the boot: a
-warm reboot carries it forward, and so does a quick power-off. The next
-boot then fails on its own, two seconds after the main system's boot splash
-starts ("AUX B … Failed to write aux backlight level: -110", then pipe B
-timeouts), with the keyboard nowhere near the laptop (verified by booting
-with an external USB keyboard for the disk password). What clears it is a
-real power reset: shut down, unplug the charger, hold the power button for
-15 seconds, leave the machine off for a minute, then power on with the
-keyboard off. A firmware "load setup defaults" clears it too, which is how
-this was first misread as a firmware problem. The state is therefore held
-by something that stays powered through a short shutdown, the embedded
-controller or the panel itself, not by the SoC.
+1. Power on with the keyboard lifted off; dock it at the disk-unlock prompt.
+2. Never dock or undock while the machine is shutting down or rebooting.
+3. If the bottom screen fails to come back, or the dock watcher's
+   notification appears: shut down, unplug the charger, hold the power
+   button for 15 seconds, leave the machine off for a minute, then power on
+   with the keyboard off. Firmware "load setup defaults" clears it too.
 
-Once the port is wedged, every display update that touches it blocks the
-compositor for a ten-second kernel timeout, which is the "dead keyboard"
-after each dock event and the slow shutdown, and the wedge survives a warm
-reboot: the firmware cannot light the panel either. The dock watcher
-notices the failure in the kernel log and sends one notification. Whenever
-you see it, power off completely, wait a few seconds, and power on again
-with the keyboard off; a reboot only carries the wedge forward. The
-dock watcher notices the same thing from the kernel log and, rather than
-freezing the machine on every dock event, keeps the panel disabled for that
-boot and tells you to power off.
+Evidence, from two days of boots on identical software:
 
-Evidence, from one day of boots on identical software (same kernel, same
-parameters, same scripts):
-
-| Keyboard at power-on | Boots | First undock after login |
+| Situation | Boots | Result |
 |---|---|---|
-| docked | 9 (cold and warm, before and after a BIOS defaults reset) | PHY B failed every time |
-| off the laptop | 4 (two on Sept 1, two on Sept 7) | clean, zero xe errors, up to three dock cycles each |
+| keyboard docked at power-on | 9 | first undock fails |
+| keyboard off at power-on, previous boot healthy | 5 | clean, dock cycles work |
+| keyboard off at power-on, previous boot wedged, reboot or quick power-off | 5 | fails 2 s into the boot splash |
+| same, after a full power reset | 1 | clean |
 
-Ruled out on the way, so nobody repeats them: a warm reboot versus a full
-power-off (both fail when docked at power-on), the USB-C charger, a BIOS
-defaults reset, `xe.enable_dc=0`, package updates, and the BIOS version.
-Panel Replay (2a) is a separate problem: turning it off does not change
-this one. Keeping eDP-2 enabled and merely dark while
-docked does not help either: Hyprland's first modeset at login already hits
-the same PHY.
+Ruled out: `xe.enable_dc=0`, Panel Replay (2a, a separate problem), the
+charger, package updates, the BIOS version, docking during boot (a boot
+with the disk password typed on an external USB keyboard failed the same
+way), forcing the connector off during boot (`video=eDP-2:d`), and keeping
+the panel enabled but dark while docked (Hyprland's first modeset at login
+hits the same PHY).
 
-This is a driver limitation, reported upstream as
+Reported upstream as
 [drm/xe issue 9196](https://gitlab.freedesktop.org/drm/xe/kernel/-/issues/9196);
-the report and both kernel logs are in `reference/xe-bug-report/`. Until it
-is fixed, the watcher is fine as long as the power-on rule is followed.
+the report and both kernel logs are in `reference/xe-bug-report/`.
 
 ## 3. Brightness
 
