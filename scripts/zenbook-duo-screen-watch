@@ -154,7 +154,9 @@ apply() {
 apply "$(stable_kb_state)"
 
 while true; do
-  udevadm monitor -u -s usb 2>/dev/null | {
+  # 9>&- so udevadm does not inherit the lock: an orphaned monitor would
+  # otherwise keep the lock and stop the next watcher from starting.
+  udevadm monitor -u -s usb 2>/dev/null 9>&- | {
     while true; do
       read -r _ || break               # EOF: udevadm exited; restart it
       while read -r -t 0.5 _; do :; done # drain the event burst
