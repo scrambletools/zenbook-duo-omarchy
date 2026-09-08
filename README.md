@@ -151,6 +151,9 @@ chosen by the one-word file `~/.config/zenbook/dock-mode`:
 - **`disable`**: the original behaviour, disabling the output through
   Omarchy's toggle mechanism (one modeset per dock/undock). Nicer when it
   works; switch back to it only once a kernel stops failing 2a.
+- For a single risky test, write the mode to `~/.config/zenbook/dock-mode-once`
+  instead: the watcher consumes that file on its next start, so a boot that
+  hangs cannot leave the mode armed for the boot after.
 
 ### 2a. Undocking hangs the whole machine
 
@@ -168,8 +171,10 @@ xe … *ERROR* [CONNECTOR:521:eDP-2] Failed to enable link training
 
 **Status:** the root cause is not pinned down. It is not Panel Replay alone
 (disabling it, below, left the failure in place), not the USB-C charger
-(fails on battery too), not a package update (none between the good and bad
-days), and not firmware (same BIOS). What is certain: the xe driver on
+(fails on battery too), not display C-states (`xe.enable_dc=0` changed
+nothing: the boot-time disable still hit "pipe_off wait timed out" and the
+PHY B failures), not a package update (none between the good and bad days),
+and not firmware (same BIOS). What is certain: the xe driver on
 7.1.9 cannot reliably bring PHY B back up after the pipe was disabled
 ("PHY B failed to request refclk"), and once that happens the next commit
 wedges the display engine. Hence the default **backlight dock mode** above,
