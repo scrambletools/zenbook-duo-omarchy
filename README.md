@@ -133,7 +133,22 @@ Install to `~/.config/zenbook/` and start it from
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watch")
 ```
 
-### 2a. Undocking hangs the whole machine (Panel Replay)
+### Dock mode: backlight (default) vs disable
+
+`zenbook-duo-screen-watch` has two ways to put the covered screen to sleep,
+chosen by the one-word file `~/.config/zenbook/dock-mode`:
+
+- **`backlight`** (default, no file needed): eDP-2 stays enabled and its
+  backlight is driven to 0 while docked (`zenbook-duo-brightness-sync` holds
+  it there), restored to the top panel's level on undock. **No modeset at
+  all**, so the xe driver never powers the panel's PHY down and up — which is
+  what hard-hangs this machine on kernel 7.1 (2a below). Cost: the panel is
+  still a target for windows and the cursor while covered.
+- **`disable`**: the original behaviour, disabling the output through
+  Omarchy's toggle mechanism (one modeset per dock/undock). Nicer when it
+  works; switch back to it only once a kernel stops failing 2a.
+
+### 2a. Undocking hangs the whole machine
 
 Symptom: lift the keyboard, the bottom screen stays black, the top screen
 freezes within seconds, and the box is dead — not even a USB keyboard works;
@@ -147,7 +162,16 @@ xe … PHY B failed to request refclk / PLL not locked
 xe … *ERROR* [CONNECTOR:521:eDP-2] Failed to enable link training
 ```
 
-The cause is **eDP Panel Replay** (the successor of PSR) on eDP-1. Both OLED
+**Status:** the root cause is not pinned down. It is not Panel Replay alone
+(disabling it, below, left the failure in place), not the USB-C charger
+(fails on battery too), not a package update (none between the good and bad
+days), and not firmware (same BIOS). What is certain: the xe driver on
+7.1.9 cannot reliably bring PHY B back up after the pipe was disabled
+("PHY B failed to request refclk"), and once that happens the next commit
+wedges the display engine. Hence the default **backlight dock mode** above,
+which avoids the modeset entirely. Both mitigations below are kept.
+
+One contributing factor was **eDP Panel Replay** (the successor of PSR) on eDP-1. Both OLED
 panels advertise it and the xe driver turns it on by default
 (`xe.enable_panel_replay=-1`). `xe.enable_psr=0` does *not* cover it —
 Panel Replay has its own switch — and `/sys/kernel/debug/dri/0/eDP-1/i915_psr_status`

@@ -10,6 +10,9 @@
 
 TOP="/sys/class/backlight/intel_backlight"
 BOTTOM_DEV="card0-eDP-2-backlight"
+# Written by zenbook-duo-screen-watch (backlight mode) while the keyboard is
+# docked: the bottom panel is covered, keep it dark instead of mirroring.
+DOCKED_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook/docked"
 
 sync_brightness() {
   local cur max pct
@@ -17,6 +20,7 @@ sync_brightness() {
   max=$(cat "$TOP/max_brightness" 2>/dev/null) || return
   ((max > 0)) || return
   pct=$((100 * cur / max))
+  [[ -f $DOCKED_STATE ]] && pct=0
   brightnessctl --device="$BOTTOM_DEV" set "${pct}%" >/dev/null 2>&1
 }
 
