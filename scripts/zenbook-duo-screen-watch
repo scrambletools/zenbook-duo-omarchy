@@ -36,6 +36,13 @@ DISABLE_RULE='hl.monitor({ output = "eDP-2", disabled = true })'
 #                         undock). Use only if the driver bug is fixed.
 MODE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zenbook/dock-mode"
 MODE=$( [[ -r $MODE_FILE ]] && tr -d '[:space:]' <"$MODE_FILE" || echo backlight )
+# One-shot override for experiments: consumed (deleted) on first use, so a
+# boot that hard-hangs does not leave the risky mode armed for the next one.
+MODE_ONCE_FILE="${MODE_FILE}-once"
+if [[ -r $MODE_ONCE_FILE ]]; then
+  MODE=$(tr -d '[:space:]' <"$MODE_ONCE_FILE")
+  rm -f "$MODE_ONCE_FILE"
+fi
 DOCKED_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook/docked"
 BOTTOM_BL="card0-eDP-2-backlight"
 TOP_BL="/sys/class/backlight/intel_backlight"
