@@ -39,6 +39,51 @@ MODE=$( [[ -r $MODE_FILE ]] && tr -d '[:space:]' <"$MODE_FILE" || echo backlight
 DOCKED_STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook/docked"
 BOTTOM_BL="card0-eDP-2-backlight"
 TOP_BL="/sys/class/backlight/intel_backlight"
+# Layout of the bottom panel from monitors.lua, and where it is parked while
+# docked: far enough that the cursor cannot cross onto it. Moving a monitor is
+# compositor-side only, no modeset.
+BOTTOM_POS="0x900"
+BOTTOM_SCALE=2
+PARK_POS="20000x20000"
+PARK_WS=99   # the empty workspace Hyprland insists on keeping on the covered panel
+
+bottom_workspaces() {
+  hyprctl workspaces -j 2>/dev/null | python3 -c 'import sys,json; print(" ".join(str(w["id"]) for w in json.load(sys.stdin) if w["monitor"]=="eDP-2"))' 2>/dev/null
+}
+
+workspace_exists() {
+  hyprctl workspaces -j 2>/dev/null | python3 -c "import sys,json; sys.exit(0 if any(w['id']==$1 for w in json.load(sys.stdin)) else 1)" 2>/dev/null
+}
+
+# Make the covered panel unreachable: park it out of cursor range, pin the
+# numbered workspaces to the top panel, hand it whatever it already shows,
+# and leave it an empty workspace under a number no keybind uses.
+park_bottom() {
+  hyprctl eval "hl.monitor({ output = \"eDP-2\", mode = \"preferred\", position = \"$PARK_POS\", scale = $BOTTOM_SCALE })" >/dev/null 2>&1
+  hyprctl eval 'for i = 1, 10 do hl.workspace_rule({ workspace = tostring(i), monitor = "eDP-1" }) end' >/dev/null 2>&1
+  local id
+  for id in $(bottom_workspaces); do
+    hyprctl dispatch "hl.dsp.workspace.move({ workspace = \"$id\", monitor = \"eDP-1\" })" >/dev/null 2>&1
+  done
+  for id in $(bottom_workspaces); do   # the one Hyprland just created to replace them
+    [[ $id == "$PARK_WS" ]] && continue
+    hyprctl dispatch "hl.dsp.workspace.change_id({ workspace = \"$id\", id = $PARK_WS })" >/dev/null 2>&1
+    hyprctl dispatch "hl.dsp.workspace.rename({ workspace = \"$PARK_WS\", name = \"dock\" })" >/dev/null 2>&1
+  done
+  hyprctl dispatch 'hl.dsp.focus({ monitor = "eDP-1" })' >/dev/null 2>&1
+}
+
+# Bring it back below the top panel with workspace 2 on it, as at boot.
+unpark_bottom() {
+  hyprctl eval "hl.monitor({ output = \"eDP-2\", mode = \"preferred\", position = \"$BOTTOM_POS\", scale = $BOTTOM_SCALE })" >/dev/null 2>&1
+  hyprctl eval 'hl.workspace_rule({ workspace = "2", monitor = "eDP-2" })' >/dev/null 2>&1
+  if workspace_exists 2; then
+    hyprctl dispatch 'hl.dsp.workspace.move({ workspace = "2", monitor = "eDP-2" })' >/dev/null 2>&1
+  elif workspace_exists "$PARK_WS"; then
+    hyprctl dispatch "hl.dsp.workspace.change_id({ workspace = \"$PARK_WS\", id = 2 })" >/dev/null 2>&1
+    hyprctl dispatch 'hl.dsp.workspace.rename({ workspace = "2", name = "2" })' >/dev/null 2>&1
+  fi
+}
 
 top_percent() {
   local cur max
@@ -81,8 +126,10 @@ apply() {
     if [[ $state == attached ]]; then
       : >"$DOCKED_STATE"
       brightnessctl --device="$BOTTOM_BL" set 0 >/dev/null 2>&1
+      park_bottom
     else
       rm -f "$DOCKED_STATE"
+      unpark_bottom
       brightnessctl --device="$BOTTOM_BL" set "$(top_percent)%" >/dev/null 2>&1
     fi
     return

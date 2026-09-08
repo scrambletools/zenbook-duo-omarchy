@@ -142,8 +142,12 @@ chosen by the one-word file `~/.config/zenbook/dock-mode`:
   backlight is driven to 0 while docked (`zenbook-duo-brightness-sync` holds
   it there), restored to the top panel's level on undock. **No modeset at
   all**, so the xe driver never powers the panel's PHY down and up — which is
-  what hard-hangs this machine on kernel 7.1 (2a below). Cost: the panel is
-  still a target for windows and the cursor while covered.
+  what hard-hangs this machine on kernel 7.1 (2a below). While docked the
+  panel is also *parked*: moved to a far-off layout position so the cursor
+  cannot cross onto it, its workspaces moved to the top panel, workspaces
+  1–10 pinned to the top panel, and the empty workspace Hyprland insists on
+  keeping there renumbered to 99 ("dock"). Undocking reverses all of it and
+  puts workspace 2 back on the bottom panel. All compositor-side, no modeset.
 - **`disable`**: the original behaviour, disabling the output through
   Omarchy's toggle mechanism (one modeset per dock/undock). Nicer when it
   works; switch back to it only once a kernel stops failing 2a.
