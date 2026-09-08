@@ -1,3 +1,5 @@
+Filed as https://gitlab.freedesktop.org/drm/xe/kernel/-/issues/9196 on 2026-09-08.
+
 Title: xe/PTL: eDP on DDI B cannot be enabled after being disabled unless the firmware lit the panel at power-on ("PHY B failed to request refclk")
 
 ## Hardware / software

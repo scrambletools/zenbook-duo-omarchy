@@ -196,8 +196,9 @@ keyboard happened to be off during that boot; the next docked power-on
 failed again. `scripts/zenbook-duo-firmware-baseline` and `reference/` stay
 as a snapshot of a healthy machine for comparison.
 
-This is a driver limitation; a ready-to-file report for drm/xe with both
-kernel logs is in `reference/xe-bug-report/`. Until it is fixed, the watcher's
+This is a driver limitation, reported upstream as
+[drm/xe issue 9196](https://gitlab.freedesktop.org/drm/xe/kernel/-/issues/9196) (the report and both kernel logs are also in
+`reference/xe-bug-report/`). Until it is fixed, the watcher's
 disable mode is fine as long as the power-on rule is followed. A no-modeset
 workaround (keep eDP-2 enabled, backlight 0, parked out of cursor reach)
 lives in the git history; it did not help either, because Hyprland's first
