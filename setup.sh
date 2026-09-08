@@ -26,18 +26,13 @@ echo "==> Touchscreen: blacklisting raydium_i2c_ts (also fixes shutdown hang)"
 pkexec install -D -m 0644 "$HERE/touchscreen/zenbook-duo-touchscreen.conf" \
   /etc/modprobe.d/zenbook-duo-touchscreen.conf
 
-echo "==> Boot: kernel parameters (panel orientation, DPCD backlight, Panel Replay off, bottom panel off during boot)"
+echo "==> Boot: kernel parameters (panel orientation, DPCD backlight, Panel Replay off)"
 pkexec bash -c "install -D -m 0644 '$HERE/boot/zenbook-duo-panel-orientation.conf' \
   /etc/limine-entry-tool.d/zenbook-duo-panel-orientation.conf && \
   install -D -m 0644 '$HERE/boot/zenbook-duo-dpcd-backlight.conf' \
   /etc/limine-entry-tool.d/zenbook-duo-dpcd-backlight.conf && \
   install -D -m 0644 '$HERE/boot/zenbook-duo-panel-replay.conf' \
-  /etc/limine-entry-tool.d/zenbook-duo-panel-replay.conf && \
-  install -D -m 0644 '$HERE/boot/zenbook-duo-bottom-panel-boot.conf' \
-  /etc/limine-entry-tool.d/zenbook-duo-bottom-panel-boot.conf && \
-  install -D -m 0644 '$HERE/udev/zenbook-duo-bottom-panel.service' \
-  /etc/systemd/system/zenbook-duo-bottom-panel.service && \
-  systemctl daemon-reload && systemctl enable zenbook-duo-bottom-panel.service && limine-update"
+  /etc/limine-entry-tool.d/zenbook-duo-panel-replay.conf && limine-update"
 
 echo "==> Helper scripts -> ~/.config/zenbook/"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-screen-watch" \
