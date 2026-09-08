@@ -133,31 +133,6 @@ Install to `~/.config/zenbook/` and start it from
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-screen-watch")
 ```
 
-### Dock mode: backlight (default) vs disable
-
-`zenbook-duo-screen-watch` has two ways to put the covered screen to sleep,
-chosen by the one-word file `~/.config/zenbook/dock-mode`:
-
-- **`disable`** (recommended; `setup.sh` writes this): disable the output
-  through Omarchy's toggle mechanism, one modeset per dock and undock. This
-  is what Windows does through ScreenXpert, and what the 2024-Duo Linux
-  tooling does too. Verified clean on kernel 7.1.9 once the hardware is
-  healthy (section 2a).
-- **`backlight`** (the fallback, and the script's built-in default when no
-  mode file exists): eDP-2 stays enabled and its backlight is driven to 0
-  while docked (`zenbook-duo-brightness-sync` holds it there), restored to
-  the top panel's level on undock. **No modeset at all**, so the driver
-  never powers the panel's PHY down and up. While docked the panel is also
-  *parked*: moved to a far-off layout position so the cursor cannot cross
-  onto it, its workspaces moved to the top panel, workspaces 1–10 pinned
-  to the top panel, and the empty workspace Hyprland insists on keeping
-  there renumbered to 99 ("dock"). Undocking reverses all of it. Use this
-  when a modeset on eDP-2 is failing (2a) — it keeps the machine usable
-  while you sort out the cause.
-- For a single risky test, write the mode to `~/.config/zenbook/dock-mode-once`
-  instead: the watcher consumes that file on its next start, so a boot that
-  hangs cannot leave the mode armed for the boot after.
-
 ### 2a. Undocking hangs the whole machine
 
 Symptom: lift the keyboard, the bottom screen stays black, the top screen
@@ -193,8 +168,7 @@ failures), package updates (none between the good and bad days), and the
 BIOS version (unchanged). What is certain: the xe driver on
 7.1.9 cannot reliably bring PHY B back up after the pipe was disabled
 ("PHY B failed to request refclk"), and once that happens the next commit
-wedges the display engine. Hence the default **backlight dock mode** above,
-which avoids the modeset entirely. Both mitigations below are kept.
+wedges the display engine. Both mitigations below are kept.
 
 One contributing factor was **eDP Panel Replay** (the successor of PSR) on eDP-1. Both OLED
 panels advertise it and the xe driver turns it on by default
@@ -210,9 +184,12 @@ the keyboard docked, when the disable of eDP-2 is the first modeset.
 for `limine-entry-tool`, installed by `setup.sh`; `sudo limine-update` and
 reboot). Cost: a little idle power on eDP-1, the same trade as `enable_psr=0`.
 
-Also relevant: `zenbook-duo-screen-watch` now takes a lock, because Hyprland
-can start it twice (once per autostart pass) and two watchers racing the same
-modeset made the failure far more likely.
+Also relevant: `zenbook-duo-screen-watch` takes a lock, because Hyprland can
+start it twice (once per autostart pass) and two watchers racing the same
+modeset made the failure far more likely. While the panel was wedged, a
+no-modeset workaround (keep eDP-2 enabled, backlight 0, park it out of
+cursor reach) kept the machine usable; it was removed once the firmware
+reset fixed the real problem, and lives in the git history if ever needed.
 
 ## 3. Brightness
 
