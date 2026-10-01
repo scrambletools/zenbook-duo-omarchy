@@ -11,11 +11,13 @@ HERE="$(dirname "$(readlink -f "$0")")"
 echo "==> Installing script dependencies (brightnessctl, inotify-tools)"
 pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools
 
-echo "==> Keyboard: Fn-key remap (hwdb), and hid-asus for the keyboard backlight"
+echo "==> Keyboard: Fn-key remap (hwdb), hid-asus rebind (Fn keys), backlight hidraw access"
 pkexec bash -c "install -D -m 0644 '$HERE/udev/61-zenbook-duo-keyboard.hwdb' \
   /etc/udev/hwdb.d/61-zenbook-duo-keyboard.hwdb && \
   install -D -m 0644 '$HERE/udev/61-zenbook-duo-keyboard.rules' \
   /etc/udev/rules.d/61-zenbook-duo-keyboard.rules && \
+  install -D -m 0644 '$HERE/udev/70-zenbook-kbd-backlight.rules' \
+  /etc/udev/rules.d/70-zenbook-kbd-backlight.rules && \
   install -D -m 0755 '$HERE/scripts/zenbook-duo-hid-asus' /usr/local/bin/zenbook-duo-hid-asus && \
   install -D -m 0755 '$HERE/scripts/zenbook-duo-fnkeys' /usr/local/bin/zenbook-duo-fnkeys && \
   install -D -m 0644 '$HERE/udev/zenbook-duo-fnkeys.service' /etc/systemd/system/zenbook-duo-fnkeys.service && \
@@ -41,6 +43,8 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-brightness-sync" \
   "$HOME/.config/zenbook/zenbook-duo-brightness-sync"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-keyboard-pair" \
   "$HOME/.config/zenbook/zenbook-duo-keyboard-pair"
+install -D -m 0755 "$HERE/scripts/zenbook-duo-kbd-backlight" \
+  "$HOME/.config/zenbook/zenbook-duo-kbd-backlight"
 
 echo "==> Audio: ghost-RT722 DKMS overlay (skips itself on fixed kernels)"
 pkexec bash "$HERE/audio/install-audio-fix.sh"
@@ -56,9 +60,10 @@ declare -A KEY_LINE=(
   [monitors]='output = "eDP-2"'
   [input]='rayd0002:00-2386:8c06'
   [autostart]='zenbook-duo-screen-watch'
+  [bindings]='zenbook-duo-kbd-backlight'
 )
 skipped=()
-for f in monitors input autostart; do
+for f in monitors input autostart bindings; do
   src="$HERE/hypr/$f.lua"
   dst="$HOME/.config/hypr/$f.lua"
   if [[ -f $dst ]] && grep -qF -e "$MARK_BEGIN" -e "${KEY_LINE[$f]}" "$dst"; then

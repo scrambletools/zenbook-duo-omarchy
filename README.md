@@ -35,6 +35,7 @@ kernel/Omarchy has made one obsolete.
 | No sound at all ("Dummy Output") | ghost-RT722 DKMS overlay | `audio/` |
 | Detached keyboard won't (re)connect over Bluetooth | pair from the host with one scan open | `scripts/zenbook-duo-keyboard-pair` |
 | Keyboard's display-brightness / keyboard-backlight / mic-mute keys do nothing | hid-asus on the vendor interface + a small hotkey bridge daemon | `scripts/zenbook-duo-hid-asus`, `scripts/zenbook-duo-fnkeys`, `udev/` |
+| Keyboard backlight never lights (kernel 7.2+) | direct hidraw control + uaccess udev rule, re-applied on dock | `scripts/zenbook-duo-kbd-backlight`, `udev/70-zenbook-kbd-backlight.rules` |
 
 ---
 
@@ -293,6 +294,51 @@ inotify and mirrors the percentage across using `brightnessctl`. Needs the
 `brightnessctl` and `inotify-tools` packages (setup.sh installs them).
 Started from `autostart.lua` the same way as the screen watcher.
 
+### 3c. Keyboard backlight dead (kernel 7.2+)
+
+Up to kernel 7.1, `asus-wmi` registered the `asus::kbd_backlight` LED and
+the keyboard backlight worked through the usual LED interface. From 7.2,
+`asus-wmi` defers keyboard-backlight ownership to `hid-asus` — but neither
+of this keyboard's IDs (USB `0b05:1cd7`, Bluetooth `0b05:1cd8`) is in
+hid-asus's device table yet, so no driver registers any LED and the
+backlight is simply off. Force-binding hid-asus (section 6c's rebind)
+does not help here: dynamically added IDs carry no quirk flags, and the
+backlight LED is only registered for table entries with
+`QUIRK_USE_KBD_BACKLIGHT`.
+
+The keyboard takes its backlight level as a **16-byte** feature report
+`5a ba c5 c4 <level>` (zero-padded) on **USB interface 4** — the same
+command the 2024 Duo community scripts send. Length matters: a 5-byte
+report (what hid-asus sends) is accepted by the kernel and silently
+ignored by this keyboard, and no init handshake is needed. The first write
+after idle sometimes stalls (`EPIPE`), so the tool retries once.
+`scripts/zenbook-duo-kbd-backlight` sends it over hidraw:
+`zenbook-duo-kbd-backlight <0-3|up|down|cycle|off|restore|get>`, with the
+level remembered in `~/.config/zenbook/kbd-backlight-level`.
+
+While the key is held, the keyboard firmware repeats the hotkey report
+about five times a second, each as a full press/release. A cycle key
+would then wrap through all four levels on a single firm press, so the
+tool steps once and ignores further step commands until 0.5 s pass
+without one.
+`udev/70-zenbook-kbd-backlight.rules` tags the keyboard's hidraw nodes
+`uaccess` so the logged-in user can write them without root — the file
+must sort before 73 (systemd's `73-seat-late.rules` is what applies the
+tag; at 99 it is silently ignored). The screen watcher re-applies the
+saved level on every dock (the keyboard forgets it when re-attached) and
+once at session start.
+
+The keyboard's backlight key (and brightness-step keys, section 6c) reach
+Hyprland as `XF86KbdLightOnOff` / `XF86KbdBrightnessUp`/`Down`, which
+Omarchy binds to `omarchy-brightness-keyboard` — a script that looks for
+the missing LED and silently does nothing. `hypr/bindings.lua` rebinds
+all three keys to this tool (`cycle` / `up` / `down`); setup.sh offers to
+append it like the other Hyprland blocks.
+
+The proper fix is a two-line kernel patch adding both IDs to hid-asus
+with `QUIRK_USE_KBD_BACKLIGHT`; until that lands upstream, the hidraw
+tool keeps working on any kernel and simply becomes redundant.
+
 ## 4. Touchscreens
 
 Two independent problems here.
@@ -418,8 +464,8 @@ The detachable keyboard (`ASUS Zenbook Duo Keyboard`; USB `0b05:1cd7` when
 docked) is a Bluetooth keyboard only while lifted off the pogo pins — docked,
 its radio is off and it is a USB keyboard. Each time it is put into pairing
 mode (hold its Bluetooth key ~3 s until the indicator blinks) it **mints a
-new static address** (`EE:02:2C:39:01:90`, `…02:90`, `…03:90`, `…05:90` over
-one afternoon). Two consequences:
+new static address** (an `EE:…` address whose low bytes step up with each
+pairing — four different addresses over one afternoon). Two consequences:
 
 - The bond the laptop holds is for an address the keyboard no longer uses,
   so "it just stopped reconnecting" after someone held the key.
