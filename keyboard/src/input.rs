@@ -13,7 +13,7 @@ use std::sync::mpsc::{self, Sender};
 use std::time::Instant;
 
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
-use wayland_client::protocol::{wl_keyboard, wl_pointer, wl_registry, wl_seat};
+use wayland_client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
     zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1, zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
@@ -36,6 +36,8 @@ pub const MOD_SUPER: u32 = 64;
 pub enum InputCmd {
     /// Tap the key carrying `keysym`, with these modifiers held.
     Key { keysym: &'static str, mods: u32 },
+    /// A touchpad gesture begins: pick up where the cursor is now.
+    PadStart,
     Motion(f32, f32),
     Scroll(f32),
     Click(u32),
@@ -115,7 +117,52 @@ fn keymap_file() -> std::io::Result<(std::fs::File, u32)> {
     Ok((f, text.len() as u32))
 }
 
-struct State;
+/// The touchpad keeps the cursor on this output: while the on-screen
+/// keyboard is up, the bottom screen is all keyboard.
+const POINTER_OUTPUT: &str = "eDP-1";
+
+#[derive(Default)]
+struct State {
+    outputs: Vec<(wl_output::WlOutput, String)>,
+}
+
+impl Dispatch<wl_output::WlOutput, ()> for State {
+    fn event(state: &mut Self, output: &wl_output::WlOutput, event: wl_output::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let wl_output::Event::Name { name } = event {
+            state.outputs.push((output.clone(), name));
+        }
+    }
+}
+
+/// Cursor position and size of POINTER_OUTPUT, in its own logical pixels,
+/// from Hyprland. The cursor is pulled onto the output if it is elsewhere.
+fn cursor_on_output() -> Option<(f64, f64, f64, f64)> {
+    let run = |args: &[&str]| {
+        std::process::Command::new("hyprctl").args(args).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let pos = run(&["cursorpos"])?;
+    let (cx, cy) = pos.trim().split_once(", ")?;
+    let (cx, cy): (f64, f64) = (cx.parse().ok()?, cy.parse().ok()?);
+    // `hyprctl monitors` text: "Monitor eDP-1 (ID 0):" then "<w>x<h>@<hz> at <x>x<y>",
+    // and "scale:"/"transform:" lines.
+    let text = run(&["monitors"])?;
+    let block = text.split("Monitor ").find(|b| b.starts_with(&format!("{POINTER_OUTPUT} ")))?;
+    let mut lines = block.lines().skip(1);
+    let geo = lines.next()?.trim();
+    let (mode, at) = geo.split_once(" at ")?;
+    let (w, rest) = mode.split_once('x')?;
+    let h = rest.split('@').next()?;
+    let (x, y) = at.split_once('x')?;
+    let field = |key: &str| block.lines().find_map(|l| l.trim().strip_prefix(key).map(|v| v.trim().to_string()));
+    let scale: f64 = field("scale:")?.parse().ok()?;
+    let transform: u32 = field("transform:")?.parse().ok()?;
+    let (mut lw, mut lh) = (w.parse::<f64>().ok()? / scale, h.parse::<f64>().ok()? / scale);
+    if transform % 2 == 1 {
+        std::mem::swap(&mut lw, &mut lh);
+    }
+    let (ox, oy): (f64, f64) = (x.parse().ok()?, y.parse().ok()?);
+    Some(((cx - ox).clamp(0.0, lw - 1.0), (cy - oy).clamp(0.0, lh - 1.0), lw, lh))
+}
 
 impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
     fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
@@ -142,10 +189,20 @@ pub fn spawn() -> Sender<InputCmd> {
         let qh = queue.handle();
         let Ok(seat) = globals.bind::<wl_seat::WlSeat, _, _>(&qh, 1..=7, ()) else { return };
 
-        let pointer = globals
-            .bind::<ZwlrVirtualPointerManagerV1, _, _>(&qh, 1..=2, ())
-            .ok()
-            .map(|m| m.create_virtual_pointer(Some(&seat), &qh, ()));
+        let mut state = State::default();
+        for g in globals.contents().clone_list() {
+            if g.interface == "wl_output" {
+                globals.registry().bind::<wl_output::WlOutput, _, _>(g.name, g.version.min(4), &qh, ());
+            }
+        }
+        let _ = queue.roundtrip(&mut state);
+        let output = state.outputs.iter().find(|(_, n)| n == POINTER_OUTPUT).map(|(o, _)| o.clone());
+        let pointer = globals.bind::<ZwlrVirtualPointerManagerV1, _, _>(&qh, 1..=2, ()).ok().map(|m| match &output {
+            Some(o) if m.version() >= 2 => m.create_virtual_pointer_with_output(Some(&seat), Some(o), &qh, ()),
+            _ => m.create_virtual_pointer(Some(&seat), &qh, ()),
+        });
+        // Touchpad position on POINTER_OUTPUT: x, y, width, height.
+        let mut pad: Option<(f64, f64, f64, f64)> = None;
 
         // Keep the keymap file alive as long as the keyboard.
         let mut _keymap = None;
@@ -156,7 +213,7 @@ pub fn spawn() -> Sender<InputCmd> {
             _keymap = Some(file);
             Some(kb)
         });
-        let _ = queue.roundtrip(&mut State);
+        let _ = queue.roundtrip(&mut state);
 
         let start = Instant::now();
         let now = || start.elapsed().as_millis() as u32;
@@ -169,9 +226,20 @@ pub fn spawn() -> Sender<InputCmd> {
                     kb.key(now(), code, wl_keyboard::KeyState::Released.into());
                     kb.modifiers(0, 0, 0, 0);
                 }
+                InputCmd::PadStart => pad = if output.is_some() { cursor_on_output() } else { None },
                 InputCmd::Motion(dx, dy) => {
                     let Some(p) = &pointer else { continue };
-                    p.motion(now(), dx as f64, dy as f64);
+                    match &mut pad {
+                        // Absolute, clamped to the output: the cursor cannot
+                        // leave it. Extents in 1/10 px keep sub-pixel steps.
+                        Some((x, y, w, h)) => {
+                            *x = (*x + dx as f64).clamp(0.0, *w - 1.0);
+                            *y = (*y + dy as f64).clamp(0.0, *h - 1.0);
+                            let (ex, ey) = ((*w * 10.0) as u32, (*h * 10.0) as u32);
+                            p.motion_absolute(now(), (*x * 10.0) as u32, (*y * 10.0) as u32, ex, ey);
+                        }
+                        None => p.motion(now(), dx as f64, dy as f64),
+                    }
                     p.frame();
                 }
                 InputCmd::Scroll(dy) => {

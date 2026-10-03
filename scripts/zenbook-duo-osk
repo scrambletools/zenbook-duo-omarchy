@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# Open, close or toggle the on-screen keyboard (zenbook-duo-keyboard), and
+# keep workspaces off the bottom screen while it covers it.
+#
+# Opening parks the bottom screen (eDP-2) on an empty named workspace that no
+# number key reaches, and moves the workspaces that were on it to the top
+# screen, so nothing opens unseen under the keyboard. Closing moves them back
+# and shows workspace 2, the bottom screen's own (monitors.lua binds it there),
+# on the bottom screen again. The keyboard itself
+# records its pid so ~/.config/hypr/monitors.lua leaves a gap between the
+# panels (cursor stays off the bottom screen); every open and close reloads
+# Hyprland to apply or drop it.
+#
+# Usage: zenbook-duo-osk [toggle|open|close]   (default: toggle)
+
+KEYBOARD="$HOME/.config/zenbook/zenbook-duo-keyboard"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook/osk-workspaces"
+PIDFILE="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook/osk.pid"
+
+# Trace of the last run, for when something does not come back.
+exec >"${XDG_RUNTIME_DIR:-/tmp}/zenbook-duo-osk.log" 2>&1
+set -x
+TOP=eDP-1
+BOTTOM=eDP-2
+PARKING="name:keyboard"
+
+dispatch() { hyprctl dispatch "$1" >/dev/null 2>&1; }
+focus_monitor() { dispatch "hl.dsp.focus({ monitor = \"$1\" })"; }
+focus_workspace() { dispatch "hl.dsp.focus({ workspace = \"$1\" })"; }
+move_workspace() { dispatch "hl.dsp.workspace.move({ workspace = \"$1\", monitor = \"$2\" })"; }
+active_on() { hyprctl -j monitors | jq -r --arg m "$1" '.[] | select(.name == $m) | .activeWorkspace.id'; }
+running() { pgrep -x zenbook-duo-key >/dev/null; }
+
+open() {
+  running && return
+  hyprctl -j monitors | jq -e --arg m "$BOTTOM" 'any(.name == $m)' >/dev/null || return # docked
+  local top_ws bottom_ws others
+  top_ws=$(active_on "$TOP")
+  bottom_ws=$(active_on "$BOTTOM")
+  others=$(hyprctl -j workspaces | jq -r --arg m "$BOTTOM" '.[] | select(.monitor == $m and .id > 0) | .id')
+  mkdir -p "${STATE%/*}"
+  printf '%s\n' "$bottom_ws" $others >"$STATE"
+
+  setsid "$KEYBOARD" >/dev/null 2>&1 </dev/null &
+  # The keyboard records its pid and reloads Hyprland (panel gap) on start.
+  for _ in $(seq 20); do running && break; sleep 0.05; done
+
+  focus_monitor "$BOTTOM"
+  focus_workspace "$PARKING"
+  for ws in $others; do move_workspace "$ws" "$TOP"; done
+  # Moving a workspace shows it on the top screen; show the original again.
+  focus_monitor "$TOP"
+  [[ -n $top_ws ]] && focus_workspace "$top_ws"
+}
+
+close() {
+  pkill -x zenbook-duo-key
+  for _ in $(seq 40); do running || break; sleep 0.05; done
+  rm -f "$PIDFILE"
+  hyprctl reload >/dev/null 2>&1 # drop the panel gap
+  [[ -f $STATE ]] || return
+  hyprctl -j monitors | jq -e --arg m "$BOTTOM" 'any(.name == $m)' >/dev/null || { rm -f "$STATE"; return; }
+  local top_ws existing
+  top_ws=$(active_on "$TOP")
+  existing=$(hyprctl -j workspaces | jq -r '.[].id')
+  while read -r ws; do
+    grep -qx "$ws" <<<"$existing" && move_workspace "$ws" "$BOTTOM"
+  done <"$STATE"
+  focus_monitor "$BOTTOM"
+  focus_workspace 2
+  focus_monitor "$TOP"
+  # If the top screen was showing workspace 2, Hyprland has picked another for it.
+  [[ -n $top_ws && $top_ws != 2 ]] && focus_workspace "$top_ws"
+  rm -f "$STATE"
+}
+
+case "${1:-toggle}" in
+  open) open ;;
+  close) close ;;
+  toggle) if running; then close; else open; fi ;;
+  *) echo "usage: zenbook-duo-osk [toggle|open|close]" >&2; exit 2 ;;
+esac

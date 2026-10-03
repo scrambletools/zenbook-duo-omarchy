@@ -304,11 +304,25 @@ F-row and the arrow cluster match it.
   the media functions, as on the physical keyboard, and the two keys left of
   DEL/INS close the keyboard and swap the two screens' workspaces.
 - **Touchpad.** One finger moves the pointer, a tap clicks, a two-finger tap
-  right-clicks, and a two-finger slide scrolls.
+  right-clicks, and a two-finger slide scrolls. It keeps the pointer on the
+  top screen. `hypr/input.lua` turns off Hyprland's `cursor:hide_on_touch`,
+  which would otherwise hide the cursor on every touch of the touchpad.
+- **The bottom screen is all keyboard while it is up.** Workspaces that were
+  on the bottom screen move to the top one, and the bottom screen shows an
+  empty named workspace no number key reaches, so nothing opens unseen under
+  the keyboard. `hypr/monitors.lua` also leaves a 100-pixel gap between the
+  screens in the layout, so the cursor can reach the top screen's last row
+  without its image spilling onto the bottom screen, and can't be moved
+  there at all. Closing the keyboard undoes all of it, and the bottom screen
+  shows workspace 2 again (`monitors.lua` binds workspace 2 to it whenever
+  the keyboard is down).
 
 It is a small Rust program in `keyboard/` (iced, drawn with the CPU renderer,
 about 4 MB), which setup.sh builds with `cargo` and installs to
-`~/.config/zenbook/zenbook-duo-keyboard`. It types through one persistent
+`~/.config/zenbook/zenbook-duo-keyboard`. `scripts/zenbook-duo-osk
+[toggle|open|close]` opens and closes it and handles the workspaces and the
+gap; the bar button, Super + Ctrl + K and the keyboard's own close key all go
+through it. Its last run is traced to `$XDG_RUNTIME_DIR/zenbook-duo-osk.log`. It types through one persistent
 Wayland virtual keyboard with a standard US keymap, sending each key on its
 real keyboard code (Shift held for shifted characters) like a physical
 keyboard, so Hyprland's key bindings see the same keys apps do. The

@@ -19,15 +19,36 @@ if zenbook_state then
   zenbook_orientation = (zenbook_state:read("*l") or "normal"):match("^%s*(.-)%s*$")
   zenbook_state:close()
 end
+-- While the on-screen keyboard (zenbook-duo-keyboard) is up, the bottom panel
+-- is all keyboard: leave a gap between the panels so the cursor can reach the
+-- top panel's last row without its image spilling onto the bottom panel (and
+-- without being moved onto it at all). The keyboard writes its pid here.
+local zenbook_gap = 0
+local zenbook_pid_file = io.open(os.getenv("HOME") .. "/.local/state/zenbook/osk.pid", "r")
+if zenbook_pid_file then
+  local pid = (zenbook_pid_file:read("*l") or ""):match("%d+")
+  zenbook_pid_file:close()
+  local comm = pid and io.open("/proc/" .. pid .. "/comm", "r")
+  if comm then
+    if comm:read("*l") == "zenbook-duo-key" then zenbook_gap = 100 end
+    comm:close()
+  end
+end
+local zenbook_off = zenbook_h + zenbook_gap -- second panel's offset when stacked or side by side
+-- Workspace 2 belongs to the bottom panel, except while the keyboard covers it
+-- (zenbook-duo-osk then moves it to the top panel and parks the bottom one).
+if zenbook_gap == 0 then
+  hl.workspace_rule({ workspace = "2", monitor = "eDP-2", default = true })
+end
 -- { eDP-1 (top) transform, position, eDP-2 (bottom) transform, position }
 -- "sharing" (opened flat, from the hinge sensor) turns only the top panel
 -- around, so someone across the table can read it.
 local zenbook_layouts = {
-  ["normal"]    = { 0, "0x0", 0, "0x" .. zenbook_h },
-  ["bottom-up"] = { 2, "0x" .. zenbook_h, 2, "0x0" },
-  ["left-up"]   = { 1, zenbook_h .. "x0", 1, "0x0" },
-  ["right-up"]  = { 3, "0x0", 3, zenbook_h .. "x0" },
-  ["sharing"]   = { 2, "0x0", 0, "0x" .. zenbook_h },
+  ["normal"]    = { 0, "0x0", 0, "0x" .. zenbook_off },
+  ["bottom-up"] = { 2, "0x" .. zenbook_off, 2, "0x0" },
+  ["left-up"]   = { 1, zenbook_off .. "x0", 1, "0x0" },
+  ["right-up"]  = { 3, "0x0", 3, zenbook_off .. "x0" },
+  ["sharing"]   = { 2, "0x0", 0, "0x" .. zenbook_off },
 }
 local zenbook_layout = zenbook_layouts[zenbook_orientation] or zenbook_layouts["normal"]
 -- Globals so input.lua (loaded after this file) can rotate each touchscreen to match.

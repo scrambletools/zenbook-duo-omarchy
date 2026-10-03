@@ -363,7 +363,28 @@ impl Keyboard {
                 self.fn_lock = !self.fn_lock;
                 self.deck.clear(); // F-row labels change
             }
-            Action::Hide => return iced::exit(),
+            Action::Hide => {
+                // zenbook-duo-osk drops the panel gap and puts the bottom
+                // screen's workspaces back. Run it in its own session so it
+                // outlives this process, and drop the pid record first so the
+                // gap goes whatever the timing.
+                let home = std::env::var_os("HOME").unwrap_or_default();
+                let script = std::path::Path::new(&home).join(".config/zenbook/zenbook-duo-osk");
+                let detached = Command::new("setsid")
+                    .arg("-f")
+                    .arg(script)
+                    .arg("close")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                if detached.is_err() {
+                    announce(false);
+                } else {
+                    forget_pid();
+                }
+                return iced::exit();
+            }
             Action::SwapScreens => {
                 let _ = Command::new("hyprctl")
                     .args(["dispatch", "hl.dsp.workspace.swap_monitors({ monitor1 = \"eDP-1\", monitor2 = \"eDP-2\" })"])
@@ -471,12 +492,16 @@ impl<'a> Deck<'a> {
             return Some(canvas::Action::publish(Message::KeyDown(i)).and_capture());
         }
         if id != MOUSE && self.on_pad(size, p) {
+            let starts = st.pad.is_empty();
             st.pad.insert(id, p);
             let n = st.pad.len();
             st.gesture = match st.gesture {
                 Some((t, most, moved)) => Some((t, most.max(n), moved)),
                 None => Some((Instant::now(), n, false)),
             };
+            if starts {
+                return Some(canvas::Action::publish(Message::Input(InputCmd::PadStart)).and_capture());
+            }
             return Some(canvas::Action::capture());
         }
         None
@@ -647,6 +672,34 @@ fn draw_legend(frame: &mut Frame, rect: Rectangle, k: &Placed, kb: &Keyboard, un
     }
 }
 
+/// Tell the monitor layout whether the keyboard is up: ~/.config/hypr/monitors.lua
+/// leaves a gap between the panels while this pid is alive, so the cursor
+/// stays off the bottom screen. Closing by `pkill` leaves a dead pid behind,
+/// which monitors.lua ignores; zenbook-duo-osk reloads Hyprland itself.
+fn announce(up: bool) {
+    let file = pid_file();
+    if up {
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&file, format!("{}\n", std::process::id()));
+    } else {
+        forget_pid();
+    }
+    let _ = Command::new("hyprctl").arg("reload").status();
+}
+
+fn pid_file() -> std::path::PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"))
+        .join("zenbook/osk.pid")
+}
+
+fn forget_pid() {
+    let _ = std::fs::remove_file(pid_file());
+}
+
 fn namespace() -> String {
     String::from("zenbook-duo-keyboard")
 }
@@ -666,6 +719,7 @@ fn main() -> Result<(), iced_layershell::Error> {
     }
     // Software rendering: the deck is flat shapes and text, and skipping the
     // GPU renderer keeps start-up quick and memory low.
+    announce(true);
     if std::env::var_os("ICED_BACKEND").is_none() {
         // SAFETY: no other threads exist yet.
         unsafe { std::env::set_var("ICED_BACKEND", "tiny-skia") };

@@ -11,9 +11,9 @@ BarWidget {
   id: root
   moduleName: "io.github.scrambletools.zenbook-duo-keyboard"
 
-  // Process names are cut to 15 characters: zenbook-duo-keyboard -> zenbook-duo-key.
-  readonly property string toggleCommand:
-    "pkill -x zenbook-duo-key || exec \"$HOME/.config/zenbook/zenbook-duo-keyboard\""
+  // zenbook-duo-osk also moves workspaces off the bottom screen while the
+  // keyboard covers it, and back afterwards.
+  readonly property string toggleCommand: "\"$HOME/.config/zenbook/zenbook-duo-osk\" toggle"
   readonly property bool bottomScreenOn: {
     var monitors = Hyprland.monitors.values
     for (var i = 0; i < monitors.length; i++)
@@ -28,6 +28,7 @@ BarWidget {
 
   Process {
     id: probe
+    // Process names are cut to 15 characters: zenbook-duo-keyboard -> zenbook-duo-key.
     command: ["pgrep", "-x", "zenbook-duo-key"]
     onExited: function(exitCode) { root.keyboardShown = exitCode === 0 }
   }

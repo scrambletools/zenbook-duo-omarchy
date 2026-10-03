@@ -48,6 +48,8 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-rotate-watch" \
   "$HOME/.config/zenbook/zenbook-duo-rotate-watch"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-auto-brightness" \
   "$HOME/.config/zenbook/zenbook-duo-auto-brightness"
+install -D -m 0755 "$HERE/scripts/zenbook-duo-osk" \
+  "$HOME/.config/zenbook/zenbook-duo-osk"
 
 echo "==> On-screen keyboard (Rust): building keyboard/, adding its bar button"
 if command -v cargo >/dev/null; then

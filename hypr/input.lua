@@ -14,8 +14,11 @@ hl.device({ name = "rayd0001:00-2386:8c05-stylus", output = "eDP-1", transform =
 -- Hyprland rotates the rendered frame but places the hardware cursor plane in
 -- unrotated coordinates, so the pointer moves mirrored on the top panel.
 -- Software cursors are composited into the frame and rotate with it.
+-- Hyprland hides the cursor on any touch, and the on-screen touchpad is a
+-- touchscreen, so the cursor would vanish whenever it is used.
 hl.config({
   cursor = {
     no_hardware_cursors = true,
+    hide_on_touch = false,
   },
 })
