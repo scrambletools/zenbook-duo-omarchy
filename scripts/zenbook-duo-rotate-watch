@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Zenbook Duo: rotate both panels with the device.
+#
+# Follows iio-sensor-proxy's accelerometer orientation (normal, bottom-up,
+# left-up, right-up), writes it to ~/.local/state/zenbook/rotation and
+# reloads Hyprland; ~/.config/hypr/monitors.lua turns that into a transform
+# and a stacked or side-by-side layout for both panels.
+#
+# Needs: iio-sensor-proxy, and the ASUS ISH firmware for the accelerometer.
+# Started from ~/.config/hypr/autostart.lua.
+#
+# Touch ~/.local/state/zenbook/rotation-lock to hold the current layout.
+
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/zenbook-duo-rotate-watch.lock"
+flock -n 9 || exit 0
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook"
+STATE="$STATE_DIR/rotation"
+LOCK="$STATE_DIR/rotation-lock"
+SETTLE=1.0 # the reading must hold this long before the screens turn
+mkdir -p "$STATE_DIR"
+
+# Keep workspace order matching the layout: the panel at 0x0 (the left one
+# side by side, the upper one stacked) shows the lower-numbered of the two
+# visible workspaces. Workspaces stay on the panel they were created on, so
+# without this, turning the device moves "workspace 1" to the right.
+order_workspaces() {
+  local json first second
+  json=$(hyprctl -j monitors 2>/dev/null) || return
+  read -r first second < <(jq -r '
+    (map(select(.x == 0 and .y == 0))[0].activeWorkspace.id // empty) as $p
+    | (map(select(.x != 0 or .y != 0))[0].activeWorkspace.id // empty) as $s
+    | "\($p) \($s)"' <<<"$json")
+  [[ -n $first && -n $second ]] || return 0 # one panel (keyboard docked)
+  ((second < first)) || return 0
+  hyprctl dispatch 'hl.dsp.workspace.swap_monitors({ monitor1 = "eDP-1", monitor2 = "eDP-2" })' >/dev/null 2>&1
+}
+
+apply() {
+  local want=$1
+  case $want in normal | bottom-up | left-up | right-up) ;; *) return ;; esac
+  [[ $want == "$applied" ]] && return
+  [[ -e $LOCK ]] && return
+  printf '%s\n' "$want" >"$STATE"
+  hyprctl reload >/dev/null 2>&1
+  applied=$want
+  sleep 0.5
+  order_workspaces
+}
+
+while true; do
+  # 9>&- so the sensor monitor does not inherit the lock.
+  stdbuf -oL monitor-sensor --accel 2>/dev/null 9>&- | {
+    applied=$(cat "$STATE" 2>/dev/null || echo normal)
+    pending=""
+    while true; do
+      if read -r -t "$SETTLE" line; then
+        case $line in
+          *"orientation changed:"*) pending=${line##*: } ;;
+          *"(orientation: "*) pending=${line#*orientation: }; pending=${pending%%,*} ;;
+        esac
+      elif (($? > 128)); then
+        # Quiet for SETTLE seconds: the last reading is stable.
+        [[ -n $pending ]] && apply "$pending"
+        pending=""
+      else
+        break # monitor-sensor exited; restart it
+      fi
+    done
+  }
+  sleep 5
+done

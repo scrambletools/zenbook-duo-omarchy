@@ -8,8 +8,8 @@
 set -euo pipefail
 HERE="$(dirname "$(readlink -f "$0")")"
 
-echo "==> Installing script dependencies (brightnessctl, inotify-tools)"
-pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools
+echo "==> Installing script dependencies (brightnessctl, inotify-tools, iio-sensor-proxy)"
+pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive
 
 echo "==> Keyboard: Fn-key remap (hwdb), hid-asus rebind (Fn keys), backlight hidraw access"
 pkexec bash -c "install -D -m 0644 '$HERE/udev/61-zenbook-duo-keyboard.hwdb' \
@@ -45,6 +45,11 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-keyboard-pair" \
   "$HOME/.config/zenbook/zenbook-duo-keyboard-pair"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-kbd-backlight" \
   "$HOME/.config/zenbook/zenbook-duo-kbd-backlight"
+install -D -m 0755 "$HERE/scripts/zenbook-duo-rotate-watch" \
+  "$HOME/.config/zenbook/zenbook-duo-rotate-watch"
+
+echo "==> Sensors: ASUS sensor-hub firmware (accelerometer for auto-rotation)"
+bash "$HERE/scripts/zenbook-duo-sensor-firmware" || echo "    sensor firmware failed; auto-rotation will stay off"
 
 echo "==> Audio: ghost-RT722 DKMS overlay (skips itself on fixed kernels)"
 pkexec bash "$HERE/audio/install-audio-fix.sh"

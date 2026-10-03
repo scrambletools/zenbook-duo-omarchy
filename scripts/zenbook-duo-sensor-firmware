@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Install ASUS's signed Intel Sensor Hub (ISH) firmware for the Zenbook Duo
+# UX8407AA, which enables the accelerometer, ambient light and hinge sensors.
+#
+# The sensor hub rejects linux-firmware's generic intel/ish/ish_ptl.bin
+# ("ISH loader: cmd 2 failed 10"), and linux-firmware has no ASUS image for
+# Panther Lake. ASUS's Windows "Intel Integrated Sensor Solution Driver"
+# carries one. It may not be redistributed, so this script fetches the driver
+# from ASUS, checks it against known checksums, and extracts the firmware.
+#
+# Usage: zenbook-duo-sensor-firmware        (asks for your password via pkexec)
+set -euo pipefail
+
+URL="https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/Chipset/48536/SensorHub_DCH_Intel_Z_V5.8.62.0_48536.exe?model=UX8407AA"
+EXE_SHA256=735a2915b421e0d35975211e0dee94bffc89c33bc688ab0567e09ee407f6e575
+FW_PATH=IshHeciExtensionTemplate/x64/FWImage/0004/AsusSign_ishS_SI_CommonPTL_5.8.1.7779_V0018.bin
+FW_SHA256=e031f54f5a4fbdc51dc9beb3937f52fdc5d2ba00f005313cf73a8cfe0f9b2060
+
+grep -qx UX8407AA /sys/class/dmi/id/board_name || { echo "not a UX8407AA" >&2; exit 1; }
+command -v bsdtar >/dev/null || { echo "needs bsdtar (package libarchive)" >&2; exit 1; }
+
+# The kernel looks for ish_<gen>_<crc32(vendor)>_<crc32(product)>.bin among
+# other names (drivers/hid/intel-ish-hid/ishtp/loader.c); this board has no
+# DMI SKU, so vendor + product name is the most specific match available.
+NAME=$(python3 - <<'EOF'
+import zlib
+def crc(f):
+    return zlib.crc32(open(f"/sys/class/dmi/id/{f}").read().strip().encode())
+print(f"ish_ptl_{crc('sys_vendor'):08x}_{crc('product_name'):08x}.bin")
+EOF
+)
+DEST=/usr/lib/firmware/updates/intel/ish/$NAME
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+echo "==> Downloading the ASUS sensor hub driver"
+curl -fL --progress-bar -A 'Mozilla/5.0' -o "$WORK/driver.exe" "$URL"
+echo "$EXE_SHA256  $WORK/driver.exe" | sha256sum -c --quiet || { echo "driver checksum mismatch" >&2; exit 1; }
+
+echo "==> Extracting the firmware"
+# The installer is a PE with a 7-Zip archive appended; bsdtar reads 7z.
+OFFSET=$(python3 -c "import sys; print(open(sys.argv[1],'rb').read().find(b'7z\xbc\xaf\x27\x1c'))" "$WORK/driver.exe")
+(( OFFSET > 0 )) || { echo "no 7z payload found" >&2; exit 1; }
+tail -c +$((OFFSET + 1)) "$WORK/driver.exe" > "$WORK/payload.7z"
+mkdir "$WORK/x"
+bsdtar -xf "$WORK/payload.7z" -C "$WORK/x" "$FW_PATH"
+echo "$FW_SHA256  $WORK/x/$FW_PATH" | sha256sum -c --quiet || { echo "firmware checksum mismatch" >&2; exit 1; }
+
+echo "==> Installing as $DEST and restarting the sensor hub"
+pkexec bash -c "install -D -m 0644 '$WORK/x/$FW_PATH' '$DEST' &&
+  { modprobe -r intel_ishtp_hid intel_ish_ipc 2>/dev/null || true; } && modprobe intel_ish_ipc"
+sleep 5
+if ls /sys/bus/iio/devices/*/name 2>/dev/null | xargs cat 2>/dev/null | grep -qx accel_3d; then
+  echo "Done: accelerometer present."
+else
+  echo "Firmware installed; no accelerometer yet. Check: journalctl -k | grep 'ISH loader'" >&2
+fi

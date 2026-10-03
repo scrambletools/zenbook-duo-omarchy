@@ -28,6 +28,7 @@ kernel/Omarchy has made one obsolete.
 | Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2b) | none |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
+| Screens don't turn when the laptop is turned (no accelerometer) | ASUS sensor-hub firmware + iio-sensor-proxy + rotation watcher | `scripts/zenbook-duo-sensor-firmware`, `scripts/zenbook-duo-rotate-watch`, `hypr/monitors.lua`, `hypr/input.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
 | Touch on one panel moves the cursor on the other | explicit touch→output mapping | `hypr/input.lua` |
 | Top touchscreen dead + kernel oops on first touch | blacklist `raydium_i2c_ts` | `touchscreen/zenbook-duo-touchscreen.conf` |
@@ -87,11 +88,9 @@ From `hypr/monitors.lua`, which `setup.sh` offers to append to
 `~/.config/hypr/monitors.lua` (after Omarchy's catch-all monitor rule, so
 these win):
 
-```lua
-local zenbook_duo_scale = omarchy_monitor_scale or 2
-hl.monitor({ output = "eDP-1", mode = "preferred", position = "0x0", scale = zenbook_duo_scale })
-hl.monitor({ output = "eDP-2", mode = "preferred", position = "0x900", scale = zenbook_duo_scale })
-```
+In the normal (laptop) orientation it places eDP-1 at `0x0` and eDP-2
+directly below it at `0x900` (the panel height at scale 2). The same block
+also does the auto-rotation layouts (section 1d).
 
 Verify with `hyprctl monitors`: eDP-1 at `0x0` with transform 0 and the
 image upright, eDP-2 at `0x900`. The permanent fix is a `UX8407AA` entry in
@@ -119,6 +118,50 @@ hl.config({
 Cost: the cursor moves in lockstep with the frame instead of one frame
 ahead, and each move damages a small region for repaint. Not noticeable in
 practice. Drop this once the backend rotates the cursor plane itself.
+
+### 1d. Auto-rotation (turn the laptop, both screens follow)
+
+Turned on its side, the Duo is a book: the two panels sit side by side. To
+follow the device, Linux needs its accelerometer, which sits behind Intel's
+sensor hub (ISH). Out of the box the hub never starts: it rejects
+linux-firmware's generic `intel/ish/ish_ptl.bin` (`ISH loader: cmd 2 failed
+10` in the kernel log), and linux-firmware has no ASUS image for Panther
+Lake. ASUS's Windows "Intel Integrated Sensor Solution Driver" contains a
+signed one (`AsusSign_ishS_SI_CommonPTL_…bin`). With it loaded, the hub
+reports an accelerometer, an ambient light sensor and a hinge-angle sensor.
+
+`scripts/zenbook-duo-sensor-firmware` (run by setup.sh) downloads that driver
+from ASUS, checks it against pinned SHA-256 sums, pulls the firmware out of
+the installer's embedded 7-Zip archive, and installs it as
+`/usr/lib/firmware/updates/intel/ish/ish_ptl_<crc32(vendor)>_<crc32(product)>.bin`,
+the board-specific name the kernel's ISH loader tries before the generic
+image. The firmware itself can't be redistributed, which is why it is
+fetched rather than shipped. Remove the file and reboot to undo it.
+
+The rotation itself is three pieces:
+
+- `iio-sensor-proxy` (setup.sh installs it) turns the raw accelerometer into
+  `normal` / `left-up` / `right-up` / `bottom-up`.
+- `scripts/zenbook-duo-rotate-watch` (started from `autostart.lua`) waits
+  until a reading has held for a second, writes it to
+  `~/.local/state/zenbook/rotation`, and reloads Hyprland.
+- `hypr/monitors.lua` reads that file and sets one transform for both panels
+  plus a stacked or side-by-side layout. Keeping the layout in the config,
+  not in a one-off `hyprctl` command, means it survives every reload,
+  including the dock watcher's. `hypr/input.lua` gives the touchscreens the
+  same transform: Hyprland does not rotate touch input with the display.
+
+Workspaces stay on the panel they were created on, so after a turn the
+watcher swaps the two panels' visible workspaces if needed. The left panel
+(side by side), or the upper one (stacked), then always shows the
+lower-numbered workspace.
+
+To hold the current layout (reading in bed, say), create
+`~/.local/state/zenbook/rotation-lock`; delete it to resume.
+
+Existing installs: setup.sh leaves Hyprland files that already have their
+Zenbook block alone, so merge the new `monitors.lua`, `input.lua` and
+`autostart.lua` blocks from `hypr/` by hand.
 
 ## 2. Bottom screen ⇄ pogo-pin keyboard
 
