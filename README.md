@@ -2,7 +2,8 @@
 
 Everything needed to make a 2026 Zenbook Duo UX8407AA fully work under
 [Omarchy](https://omarchy.org) (Arch + Hyprland), collected from getting one
-machine working in September 2026 on kernel `7.1.9-arch1-2`. Every config and
+machine working in September–October 2026, first on Arch's `7.1.9-arch1-2`
+and then on Omarchy's own kernel, `linux-omarchy` 7.2.5. Every config and
 binary referenced here ships in this directory, ready to copy.
 
 > **If the bottom screen stays black after undocking, the keyboard goes dead
@@ -14,9 +15,10 @@ binary referenced here ships in this directory, ready to copy.
 > forward. Details in section 2b. (A top screen that goes dark right after
 > login is a different problem, section 2a.)
 
-**Quick start:** `bash setup.sh` (it asks before appending its three blocks to
-your Hyprland config), power off, and power on with the keyboard lifted off
-(section 2b).
+**Quick start:** `bash setup.sh` (it asks before appending its four blocks to
+your Hyprland config, and downloads ASUS's sensor driver to extract the
+sensor-hub firmware, section 1d), power off, and power on with the keyboard
+lifted off (section 2b).
 The sections below explain each fix so you can tell whether a newer
 kernel/Omarchy has made one obsolete.
 
@@ -28,7 +30,7 @@ kernel/Omarchy has made one obsolete.
 | Bottom screen never comes back after undocking; machine freezes for 10 s per dock event; shutdown hangs a minute | power on with the keyboard off the laptop (section 2b) | none |
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
-| Screens don't turn when the laptop is turned (no accelerometer) | ASUS sensor-hub firmware + iio-sensor-proxy + rotation watcher | `scripts/zenbook-duo-sensor-firmware`, `scripts/zenbook-duo-rotate-watch`, `hypr/monitors.lua`, `hypr/input.lua` |
+| Screens don't turn when the laptop is turned (no accelerometer); no sharing mode when opened flat | ASUS sensor-hub firmware + iio-sensor-proxy + rotation watcher (with hinge-sensor sharing mode) | `scripts/zenbook-duo-sensor-firmware`, `scripts/zenbook-duo-rotate-watch`, `hypr/monitors.lua`, `hypr/input.lua` |
 | Screen brightness doesn't follow the room light | ambient-light auto-brightness (same sensor firmware) | `scripts/zenbook-duo-auto-brightness`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
 | Touch on one panel moves the cursor on the other | explicit touch→output mapping | `hypr/input.lua` |
@@ -36,8 +38,8 @@ kernel/Omarchy has made one obsolete.
 | Shutdown/reboot hangs at the goodbye splash | same blacklist (see below) | same file |
 | No sound at all ("Dummy Output") | ghost-RT722 DKMS overlay | `audio/` |
 | Detached keyboard won't (re)connect over Bluetooth | pair from the host with one scan open | `scripts/zenbook-duo-keyboard-pair` |
-| Keyboard's display-brightness / keyboard-backlight / mic-mute keys do nothing | hid-asus on the vendor interface + a small hotkey bridge daemon | `scripts/zenbook-duo-hid-asus`, `scripts/zenbook-duo-fnkeys`, `udev/` |
-| Keyboard backlight never lights (kernel 7.2+) | direct hidraw control + uaccess udev rule, re-applied on dock | `scripts/zenbook-duo-kbd-backlight`, `udev/70-zenbook-kbd-backlight.rules` |
+| Keyboard's mute / volume / display-brightness / keyboard-backlight / mic-mute keys do nothing | hid-asus on the vendor interface + a small hotkey bridge daemon | `scripts/zenbook-duo-hid-asus`, `scripts/zenbook-duo-fnkeys`, `udev/` |
+| Keyboard backlight dead after powering on docked; backlight key skips levels when held | helper rule also matches boot-time `add`; debounced hidraw tool, re-applied on dock | `udev/61-zenbook-duo-keyboard.rules`, `scripts/zenbook-duo-kbd-backlight`, `udev/70-zenbook-kbd-backlight.rules` |
 
 ---
 
@@ -355,50 +357,45 @@ inotify and mirrors the percentage across using `brightnessctl`. Needs the
 `brightnessctl` and `inotify-tools` packages (setup.sh installs them).
 Started from `autostart.lua` the same way as the screen watcher.
 
-### 3c. Keyboard backlight dead (kernel 7.2+)
+### 3c. Keyboard backlight dead after powering on docked
 
-Up to kernel 7.1, `asus-wmi` registered the `asus::kbd_backlight` LED and
-the keyboard backlight worked through the usual LED interface. From 7.2,
-`asus-wmi` defers keyboard-backlight ownership to `hid-asus` — but neither
-of this keyboard's IDs (USB `0b05:1cd7`, Bluetooth `0b05:1cd8`) is in
-hid-asus's device table yet, so no driver registers any LED and the
-backlight is simply off. Force-binding hid-asus (section 6c's rebind)
-does not help here: dynamically added IDs carry no quirk flags, and the
-backlight LED is only registered for table entries with
-`QUIRK_USE_KBD_BACKLIGHT`.
+The keyboard's backlight is the `asus::kbd_backlight` LED that `hid-asus`
+registers once section 6c's helper hands it the keyboard's vendor
+interface. With the keyboard docked at power-on, that helper used to never
+run: the keyboard binds to `hid-generic` inside the initramfs (it is needed
+for the disk-unlock prompt), where the helper's udev rule does not exist,
+and the rule only reacted to `bind` events. The only event the keyboard sees
+after the switch to the real root is the `add` that `systemd-udev-trigger`
+replays, so it stayed on `hid-generic` for the whole session: no backlight
+LED, and the F-row sent plain F-keys (section 6c). A keyboard docked or
+reconnected after boot was fine. The rule now matches `add|bind`, which
+covers both cases. (Verified on 7.1.9 and 7.2.5: on a dock after boot the
+helper rebinds and the LED drives the backlight.)
 
-The keyboard takes its backlight level as a **16-byte** feature report
-`5a ba c5 c4 <level>` (zero-padded) on **USB interface 4** — the same
-command the 2024 Duo community scripts send. Length matters: a 5-byte
-report (what hid-asus sends) is accepted by the kernel and silently
-ignored by this keyboard, and no init handshake is needed. The first write
-after idle sometimes stalls (`EPIPE`), so the tool retries once.
-`scripts/zenbook-duo-kbd-backlight` sends it over hidraw:
+The backlight key itself goes through `scripts/zenbook-duo-kbd-backlight`
+rather than Omarchy's `omarchy-brightness-keyboard`, because the firmware
+repeats the hotkey report about five times a second while the key is held,
+each as a full press/release. A cycle key would wrap through all four
+levels on a single firm press; the tool steps once and ignores further step
+commands until 0.5 s pass without one. `hypr/bindings.lua` rebinds
+`XF86KbdLightOnOff` / `XF86KbdBrightnessUp`/`Down` to it (`cycle` / `up` /
+`down`); setup.sh offers to append it like the other Hyprland blocks.
+
+The tool talks to the keyboard directly over hidraw, so it works whether or
+not `hid-asus` holds the keyboard: a **16-byte** feature report
+`5a ba c5 c4 <level>` (zero-padded) on **USB interface 4**, the vendor
+interface (the same command the 2024 Duo community scripts send). Shorter
+reports are accepted by the kernel but ignored by this keyboard, and no
+init handshake is needed. The first write after idle sometimes stalls
+(`EPIPE`), so it retries once. Usage:
 `zenbook-duo-kbd-backlight <0-3|up|down|cycle|off|restore|get>`, with the
 level remembered in `~/.config/zenbook/kbd-backlight-level`.
-
-While the key is held, the keyboard firmware repeats the hotkey report
-about five times a second, each as a full press/release. A cycle key
-would then wrap through all four levels on a single firm press, so the
-tool steps once and ignores further step commands until 0.5 s pass
-without one.
 `udev/70-zenbook-kbd-backlight.rules` tags the keyboard's hidraw nodes
-`uaccess` so the logged-in user can write them without root — the file
-must sort before 73 (systemd's `73-seat-late.rules` is what applies the
-tag; at 99 it is silently ignored). The screen watcher re-applies the
-saved level on every dock (the keyboard forgets it when re-attached) and
-once at session start.
-
-The keyboard's backlight key (and brightness-step keys, section 6c) reach
-Hyprland as `XF86KbdLightOnOff` / `XF86KbdBrightnessUp`/`Down`, which
-Omarchy binds to `omarchy-brightness-keyboard` — a script that looks for
-the missing LED and silently does nothing. `hypr/bindings.lua` rebinds
-all three keys to this tool (`cycle` / `up` / `down`); setup.sh offers to
-append it like the other Hyprland blocks.
-
-The proper fix is a two-line kernel patch adding both IDs to hid-asus
-with `QUIRK_USE_KBD_BACKLIGHT`; until that lands upstream, the hidraw
-tool keeps working on any kernel and simply becomes redundant.
+`uaccess` so the logged-in user can write them without root. The file must
+sort before 73 (systemd's `73-seat-late.rules` is what applies the tag; at
+99 it is silently ignored). The screen watcher re-applies the saved level
+on every dock (the keyboard forgets it when re-attached) and once at
+session start.
 
 ### 3d. Auto-brightness from the ambient light sensor
 
@@ -696,11 +693,16 @@ grep -o 'enable_panel_replay=[0-9]' /proc/cmdline   # 0
 journalctl -k -b | grep -c 'PSR Idle for re-enable'  # 0
 brightnessctl set 30%; sleep 2; brightnessctl set 60%  # top panel visibly dims/brightens
 bluetoothctl devices Paired | grep 'Zenbook Duo Keyboard'   # exactly one entry
-ls /sys/class/leds | grep kbd_backlight   # asus::kbd_backlight once the keyboard is docked/connected
+~/.config/zenbook/zenbook-duo-kbd-backlight get   # saved keyboard backlight level 0-3 (section 3c)
 systemctl is-active zenbook-duo-fnkeys     # active; journal shows "watching /dev/hidrawN"
 hyprctl devices | grep rayd        # both touchscreens present
 hyprctl getoption cursor:no_hardware_cursors   # int: 1
-journalctl -k -b | grep -i ghost   # "ignoring unattached firmware ghost" (pre-7.2 kernels)
+journalctl -k -b | grep -i ghost   # "ignoring unattached firmware ghost" (kernels before 7.3)
+dkms status | grep zenbook         # an overlay version installed for the running kernel (section 5)
+journalctl -k -b | grep 'ISH loader'   # "firmware loaded", FW 5.8.1.x (section 1d)
+cat /sys/bus/iio/devices/*/name    # includes accel_3d, als and hinge
+monitor-sensor                     # orientation and light level change as you move the laptop / cover the sensor
+cat ~/.local/state/zenbook/rotation   # current layout: normal, left-up, right-up, bottom-up or sharing
 ```
 
 Power on with the keyboard off the laptop and dock it only once the
@@ -710,8 +712,14 @@ unlock prompt is on both screens (section 2b). Then:
   undocked, with no `PHY B` lines in `journalctl -k -b`.
 - Undock and press a key: it types over Bluetooth within a few seconds (if
   not, section 6b).
-- Brightness, keyboard backlight and mic mute keys work docked and detached
-  (section 6c).
+- Mute, volume, brightness, keyboard backlight and mic mute keys work docked
+  and detached (section 6c).
+- Turn the laptop onto each side: both screens rotate, workspace 1 stays on
+  the left screen, and touch lands where you touch (section 1d).
+- Open it flat on the table: the top screen turns around for the person
+  opposite; tilt it up and it turns back (section 1d).
+- Cover the sensor near the webcam: the screens fade darker; Super+F5
+  returns auto-brightness to its default curve (section 3d).
 - Touch each screen: the cursor reacts on the screen you touched.
 - Change brightness: both panels follow.
 - Reboot and shutdown complete without hanging at the splash, and the
