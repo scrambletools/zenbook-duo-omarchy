@@ -1,3 +1,0 @@
-# Zenbook Duo pogo keyboard (0b05:1cd7): let the logged-in user drive the
-# backlight over hidraw (asus::kbd_backlight LED is gone on kernel 7.2+).
-KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0b05", ATTRS{idProduct}=="1cd7", TAG+="uaccess"

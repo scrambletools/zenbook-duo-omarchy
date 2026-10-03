@@ -39,7 +39,7 @@ kernel/Omarchy has made one obsolete.
 | No sound at all ("Dummy Output") | ghost-RT722 DKMS overlay | `audio/` |
 | Detached keyboard won't (re)connect over Bluetooth | pair from the host with one scan open | `scripts/zenbook-duo-keyboard-pair` |
 | Keyboard's mute / volume / display-brightness / keyboard-backlight / mic-mute keys do nothing | hid-asus on the vendor interface + a small hotkey bridge daemon | `scripts/zenbook-duo-hid-asus`, `scripts/zenbook-duo-fnkeys`, `udev/` |
-| Keyboard backlight dead after powering on docked; backlight key skips levels when held | helper rule also matches boot-time `add`; debounced hidraw tool, re-applied on dock | `udev/61-zenbook-duo-keyboard.rules`, `scripts/zenbook-duo-kbd-backlight`, `udev/70-zenbook-kbd-backlight.rules` |
+| Keyboard backlight and F-row keys dead after powering on docked | helper rule also matches the boot-time `add` event (section 3c) | `udev/61-zenbook-duo-keyboard.rules` |
 
 ---
 
@@ -361,41 +361,18 @@ Started from `autostart.lua` the same way as the screen watcher.
 
 The keyboard's backlight is the `asus::kbd_backlight` LED that `hid-asus`
 registers once section 6c's helper hands it the keyboard's vendor
-interface. With the keyboard docked at power-on, that helper used to never
+interface; Omarchy's stock keyboard-backlight key and brightness keys then
+drive it. With the keyboard docked at power-on, the helper used to never
 run: the keyboard binds to `hid-generic` inside the initramfs (it is needed
 for the disk-unlock prompt), where the helper's udev rule does not exist,
 and the rule only reacted to `bind` events. The only event the keyboard sees
 after the switch to the real root is the `add` that `systemd-udev-trigger`
 replays, so it stayed on `hid-generic` for the whole session: no backlight
-LED, and the F-row sent plain F-keys (section 6c). A keyboard docked or
-reconnected after boot was fine. The rule now matches `add|bind`, which
-covers both cases. (Verified on 7.1.9 and 7.2.5: on a dock after boot the
-helper rebinds and the LED drives the backlight.)
-
-The backlight key itself goes through `scripts/zenbook-duo-kbd-backlight`
-rather than Omarchy's `omarchy-brightness-keyboard`, because the firmware
-repeats the hotkey report about five times a second while the key is held,
-each as a full press/release. A cycle key would wrap through all four
-levels on a single firm press; the tool steps once and ignores further step
-commands until 0.5 s pass without one. `hypr/bindings.lua` rebinds
-`XF86KbdLightOnOff` / `XF86KbdBrightnessUp`/`Down` to it (`cycle` / `up` /
-`down`); setup.sh offers to append it like the other Hyprland blocks.
-
-The tool talks to the keyboard directly over hidraw, so it works whether or
-not `hid-asus` holds the keyboard: a **16-byte** feature report
-`5a ba c5 c4 <level>` (zero-padded) on **USB interface 4**, the vendor
-interface (the same command the 2024 Duo community scripts send). Shorter
-reports are accepted by the kernel but ignored by this keyboard, and no
-init handshake is needed. The first write after idle sometimes stalls
-(`EPIPE`), so it retries once. Usage:
-`zenbook-duo-kbd-backlight <0-3|up|down|cycle|off|restore|get>`, with the
-level remembered in `~/.config/zenbook/kbd-backlight-level`.
-`udev/70-zenbook-kbd-backlight.rules` tags the keyboard's hidraw nodes
-`uaccess` so the logged-in user can write them without root. The file must
-sort before 73 (systemd's `73-seat-late.rules` is what applies the tag; at
-99 it is silently ignored). The screen watcher re-applies the saved level
-on every dock (the keyboard forgets it when re-attached) and once at
-session start.
+LED, and the F-row sent plain F-keys (section 6c). The rule now matches
+`add|bind`, which covers a keyboard docked at power-on as well as one docked
+or reconnected later. Verified on 7.2.5: powered on docked, the helper
+rebinds within seconds of boot, and over Bluetooth the vendor interface also
+lands on `hid-asus`.
 
 ### 3d. Auto-brightness from the ambient light sensor
 
@@ -612,14 +589,15 @@ found by capturing the raw HID traffic:
 - Once `hid-asus` is bound to that interface *with its keyboard-backlight
   quirk*, the firmware switches to real ASUS hotkey reports: report id `0x5a`
   with one code byte (`0x20` display brightness up, `0x10` display
-  brightness down, `0xc7` keyboard backlight cycle, `0x7c` mic mute).
+  brightness down, `0xc7` keyboard backlight cycle, `0x7c` mic mute). Mute
+  and volume switch to ordinary consumer-page codes, which work as they are.
 - `hid-asus` would normally map those codes to keys, but this keyboard
   declares the `0x5a` report as a single `Usage 0x76` with variable data,
   not the usage array the driver's mapping table works on; the driver only
   rewrites that shape for two old models, keyed on exact descriptor sizes.
   So the reports arrive and stop there.
 
-Three pieces, all installed by `setup.sh`:
+Two pieces, both installed by `setup.sh`:
 
 1. **`scripts/zenbook-duo-hid-asus` + `udev/61-zenbook-duo-keyboard.rules`** —
    this 2026 keyboard (USB `0b05:1cd7`, Bluetooth `0b05:1cd8`) is not in
@@ -640,21 +618,23 @@ Three pieces, all installed by `setup.sh`:
    Omarchy's stock bindings then fire — display brightness steps the panels,
    the backlight key cycles the LED levels, mic mute toggles the microphone. Unknown codes are logged
    (`journalctl -u zenbook-duo-fnkeys`) so new keys are easy to add.
-3. **`udev/61-zenbook-duo-keyboard.hwdb`** — belt and braces: maps the plain
-   F1/F2/F3/F5/F6/F4/F10 scancodes to the same functions for this keyboard only, so
-   the keys still work in the window before `hid-asus` binds. Harmless
-   otherwise, since the firmware sends either the F-key or the hotkey, never
-   both.
 
 The proper fix is a kernel patch: the ids in `hid-ids.h`, a device-table
 entry with `QUIRK_USE_KBD_BACKLIGHT`, and a report-descriptor fixup that
 turns `Usage 0x76` into `Usage Min 0x00 / Max 0xff` for the `0x5a` input
-report, after which `hid-asus` maps everything natively and pieces 2 and 3
-become unnecessary.
+report, after which `hid-asus` maps everything natively and piece 2
+becomes unnecessary.
+
+An earlier version of this package also remapped the plain F-keys with an
+hwdb file and drove the backlight through its own hidraw tool. Both only
+covered for `hid-asus` not being bound, which in practice meant a keyboard
+docked at power-on (section 3c); with that fixed they were removed, and
+`setup.sh` deletes them from older installs.
 
 Verified on both paths: docked over USB and detached over Bluetooth, the
-four keys work and the backlight LED follows the keyboard; everything comes
-back by itself after docking, reconnecting, or a reboot.
+keys work and the backlight LED follows the keyboard; everything comes back
+by itself after docking, reconnecting, or a reboot. With `hid-asus` bound,
+each key press is a single report, even when held.
 
 Diagnose with a raw capture (root): read `/dev/hidraw*` for the keyboard
 plus `/dev/input/event*` while pressing keys. `5a 20 00 …` on the vendor
@@ -693,7 +673,7 @@ grep -o 'enable_panel_replay=[0-9]' /proc/cmdline   # 0
 journalctl -k -b | grep -c 'PSR Idle for re-enable'  # 0
 brightnessctl set 30%; sleep 2; brightnessctl set 60%  # top panel visibly dims/brightens
 bluetoothctl devices Paired | grep 'Zenbook Duo Keyboard'   # exactly one entry
-~/.config/zenbook/zenbook-duo-kbd-backlight get   # saved keyboard backlight level 0-3 (section 3c)
+ls /sys/class/leds | grep kbd_backlight   # asus::kbd_backlight, also when powered on docked (section 3c)
 systemctl is-active zenbook-duo-fnkeys     # active; journal shows "watching /dev/hidrawN"
 hyprctl devices | grep rayd        # both touchscreens present
 hyprctl getoption cursor:no_hardware_cursors   # int: 1

@@ -117,14 +117,6 @@ apply() {
     [[ -f $WEDGED ]] && return
   fi
   set_toggle "$state"
-  if [[ $state == attached ]]; then
-    # The keyboard resets its backlight on every re-dock, and kernel 7.2+
-    # has no asus::kbd_backlight LED (asus-wmi defers to hid-asus, which
-    # lacks this device ID). Re-apply the saved level over hidraw once
-    # enumeration settles; node access comes from the udev uaccess rule.
-    sleep 2
-    "$HOME/.config/zenbook/zenbook-duo-kbd-backlight" restore >/dev/null 2>&1
-  fi
   if [[ $state == absent ]]; then
     # Re-enabling via reload doesn't always power the panel back up
     # (same reason omarchy's clamshell fires dpms after enabling).
@@ -151,9 +143,6 @@ if [[ ! -f $WEDGED ]] && wedged_in_log; then
 fi
 
 apply "$(stable_kb_state)"
-# Restore the keyboard backlight at session start too: apply() only acts on
-# state changes, and nothing else restores it since the LED device is gone.
-[[ $(kb_state) == attached ]] && "$HOME/.config/zenbook/zenbook-duo-kbd-backlight" restore >/dev/null 2>&1
 
 while true; do
   # 9>&- so udevadm does not inherit the lock: an orphaned monitor would

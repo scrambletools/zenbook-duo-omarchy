@@ -11,18 +11,19 @@ HERE="$(dirname "$(readlink -f "$0")")"
 echo "==> Installing script dependencies (brightnessctl, inotify-tools, iio-sensor-proxy)"
 pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive
 
-echo "==> Keyboard: Fn-key remap (hwdb), hid-asus rebind (Fn keys), backlight hidraw access"
-pkexec bash -c "install -D -m 0644 '$HERE/udev/61-zenbook-duo-keyboard.hwdb' \
-  /etc/udev/hwdb.d/61-zenbook-duo-keyboard.hwdb && \
+echo "==> Keyboard: hid-asus rebind and the Fn-key bridge (section 6c)"
+# The rm cleans up an older version of this package, which also shipped an
+# F-key remap (hwdb) and a hidraw backlight tool; hid-asus makes both redundant.
+pkexec bash -c "rm -f /etc/udev/hwdb.d/61-zenbook-duo-keyboard.hwdb \
+    /etc/udev/rules.d/70-zenbook-kbd-backlight.rules && \
   install -D -m 0644 '$HERE/udev/61-zenbook-duo-keyboard.rules' \
   /etc/udev/rules.d/61-zenbook-duo-keyboard.rules && \
-  install -D -m 0644 '$HERE/udev/70-zenbook-kbd-backlight.rules' \
-  /etc/udev/rules.d/70-zenbook-kbd-backlight.rules && \
   install -D -m 0755 '$HERE/scripts/zenbook-duo-hid-asus' /usr/local/bin/zenbook-duo-hid-asus && \
   install -D -m 0755 '$HERE/scripts/zenbook-duo-fnkeys' /usr/local/bin/zenbook-duo-fnkeys && \
   install -D -m 0644 '$HERE/udev/zenbook-duo-fnkeys.service' /etc/systemd/system/zenbook-duo-fnkeys.service && \
   systemd-hwdb update && udevadm control --reload && systemctl daemon-reload && \
   systemctl enable --now zenbook-duo-fnkeys.service"
+rm -f "$HOME/.config/zenbook/zenbook-duo-kbd-backlight" "$HOME/.config/zenbook/kbd-backlight-level"
 
 echo "==> Touchscreen: blacklisting raydium_i2c_ts (also fixes shutdown hang)"
 pkexec install -D -m 0644 "$HERE/touchscreen/zenbook-duo-touchscreen.conf" \
@@ -43,8 +44,6 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-brightness-sync" \
   "$HOME/.config/zenbook/zenbook-duo-brightness-sync"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-keyboard-pair" \
   "$HOME/.config/zenbook/zenbook-duo-keyboard-pair"
-install -D -m 0755 "$HERE/scripts/zenbook-duo-kbd-backlight" \
-  "$HOME/.config/zenbook/zenbook-duo-kbd-backlight"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-rotate-watch" \
   "$HOME/.config/zenbook/zenbook-duo-rotate-watch"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-auto-brightness" \
@@ -67,7 +66,7 @@ declare -A KEY_LINE=(
   [monitors]='output = "eDP-2"'
   [input]='rayd0002:00-2386:8c06'
   [autostart]='zenbook-duo-screen-watch'
-  [bindings]='zenbook-duo-kbd-backlight'
+  [bindings]='zenbook-duo-auto-brightness reset'
 )
 skipped=()
 for f in monitors input autostart bindings; do
