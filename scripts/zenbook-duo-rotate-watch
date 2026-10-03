@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Zenbook Duo: rotate both panels with the device.
+# Zenbook Duo: rotate both panels with the device, and turn the top panel
+# around for the person opposite when the laptop lies opened flat on a table
+# (opened flat but tilted up, on the kickstand or in hand, is normal use).
 #
 # Follows iio-sensor-proxy's accelerometer orientation (normal, bottom-up,
-# left-up, right-up), writes it to ~/.local/state/zenbook/rotation and
-# reloads Hyprland; ~/.config/hypr/monitors.lua turns that into a transform
-# and a stacked or side-by-side layout for both panels.
+# left-up, right-up) and the hinge sensor's opening angle, writes the
+# resulting layout (one of those, or "sharing") to
+# ~/.local/state/zenbook/rotation and reloads Hyprland;
+# ~/.config/hypr/monitors.lua turns that into per-panel transforms and a
+# stacked or side-by-side layout.
 #
-# Needs: iio-sensor-proxy, and the ASUS ISH firmware for the accelerometer.
+# Needs: iio-sensor-proxy, and the ASUS ISH firmware for the sensors.
 # Started from ~/.config/hypr/autostart.lua.
 #
 # Touch ~/.local/state/zenbook/rotation-lock to hold the current layout.
@@ -17,8 +21,26 @@ flock -n 9 || exit 0
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook"
 STATE="$STATE_DIR/rotation"
 LOCK="$STATE_DIR/rotation-lock"
-SETTLE=1.0 # the reading must hold this long before the screens turn
+SETTLE=1.0      # an orientation reading must hold this long (seconds)
+SHARE_ON=170    # hinge angle (degrees) at which sharing mode starts...
+SHARE_OFF=160   # ...and below which it ends; the gap stops flicker at the edge
+LEVEL_ON=15     # base tilt (degrees) at or under which it counts as lying flat...
+LEVEL_OFF=25    # ...and over which it is tilted up again
+POLL=0.5        # hinge poll interval (seconds)
 mkdir -p "$STATE_DIR"
+
+hinge_raw() {
+  local d
+  for d in /sys/bus/iio/devices/iio:device*; do
+    if [[ $(<"$d/name") == hinge ]]; then
+      # Channel 0 "hinge" is the opening angle, channel 2 "keyboard" the
+      # base's tilt from level; raw values are degrees.
+      echo "$d/in_angl0_raw $d/in_angl2_raw"
+      return
+    fi
+  done 2>/dev/null
+}
+read -r HINGE BASE < <(hinge_raw)
 
 # Keep workspace order matching the layout: the panel at 0x0 (the left one
 # side by side, the upper one stacked) shows the lower-numbered of the two
@@ -38,7 +60,6 @@ order_workspaces() {
 
 apply() {
   local want=$1
-  case $want in normal | bottom-up | left-up | right-up) ;; *) return ;; esac
   [[ $want == "$applied" ]] && return
   [[ -e $LOCK ]] && return
   printf '%s\n' "$want" >"$STATE"
@@ -48,24 +69,44 @@ apply() {
   order_workspaces
 }
 
+now_ms() { echo $((${EPOCHREALTIME/./} / 1000)); }
+
 while true; do
   # 9>&- so the sensor monitor does not inherit the lock.
   stdbuf -oL monitor-sensor --accel 2>/dev/null 9>&- | {
     applied=$(cat "$STATE" 2>/dev/null || echo normal)
-    pending=""
+    orientation=$applied
+    [[ $orientation == sharing ]] && orientation=normal
+    sharing=0
+    pending="" pending_since=0
     while true; do
-      if read -r -t "$SETTLE" line; then
+      if read -r -t "$POLL" line; then
         case $line in
           *"orientation changed:"*) pending=${line##*: } ;;
           *"(orientation: "*) pending=${line#*orientation: }; pending=${pending%%,*} ;;
+          *) continue ;;
         esac
-      elif (($? > 128)); then
-        # Quiet for SETTLE seconds: the last reading is stable.
-        [[ -n $pending ]] && apply "$pending"
-        pending=""
-      else
+        case $pending in normal | bottom-up | left-up | right-up) pending_since=$(now_ms) ;; *) pending="" ;; esac
+      elif (($? <= 128)); then
         break # monitor-sensor exited; restart it
       fi
+
+      # An orientation counts once it has held for SETTLE seconds.
+      if [[ -n $pending ]] && (($(now_ms) - pending_since >= ${SETTLE%.*} * 1000)); then
+        orientation=$pending
+        pending=""
+      fi
+
+      if [[ -n $HINGE ]] && angle=$(<"$HINGE") && tilt=$(<"$BASE"); then
+        ((tilt > 180)) && ((tilt = 360 - tilt)) # either way from level
+        if ((sharing == 0 && angle >= SHARE_ON && tilt <= LEVEL_ON)); then
+          sharing=1
+        elif ((sharing == 1 && (angle <= SHARE_OFF || tilt >= LEVEL_OFF))); then
+          sharing=0
+        fi
+      fi 2>/dev/null
+
+      if ((sharing)); then apply sharing; else apply "$orientation"; fi
     done
   }
   sleep 5

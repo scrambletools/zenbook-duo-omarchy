@@ -146,16 +146,33 @@ The rotation itself is three pieces:
 - `scripts/zenbook-duo-rotate-watch` (started from `autostart.lua`) waits
   until a reading has held for a second, writes it to
   `~/.local/state/zenbook/rotation`, and reloads Hyprland.
-- `hypr/monitors.lua` reads that file and sets one transform for both panels
+- `hypr/monitors.lua` reads that file and sets each panel's transform
   plus a stacked or side-by-side layout. Keeping the layout in the config,
   not in a one-off `hyprctl` command, means it survives every reload,
-  including the dock watcher's. `hypr/input.lua` gives the touchscreens the
-  same transform: Hyprland does not rotate touch input with the display.
+  including the dock watcher's. `hypr/input.lua` gives each touchscreen its
+  panel's transform: Hyprland does not rotate touch input with the display.
 
 Workspaces stay on the panel they were created on, so after a turn the
 watcher swaps the two panels' visible workspaces if needed. The left panel
 (side by side), or the upper one (stacked), then always shows the
 lower-numbered workspace.
+
+**Sharing mode.** Opened fully flat on a table, the top panel turns around
+(transform 2, touch included) so someone sitting opposite can read it, while
+the bottom panel stays the right way up for you. The ISH's hinge sensor
+tells the two flat cases apart: its `hinge` channel is the opening angle and
+its `keyboard` channel the base's tilt from level (both in degrees). Measured
+on a UX8407AA:
+
+| Pose | hinge | base tilt |
+|---|---|---|
+| Laptop | 107–118° | 2–3° |
+| Opened flat, lying on the table | 177° | 1–2° |
+| Opened flat, tilted up (kickstand or in hand) | 177° | ~45–55° |
+
+So sharing needs both hinge ≥ 170° and base tilt ≤ 15°, and ends at hinge
+≤ 160° or base tilt ≥ 25°. Tilted-up flat stays normal use. While sharing,
+the accelerometer orientation is ignored.
 
 To hold the current layout (reading in bed, say), create
 `~/.local/state/zenbook/rotation-lock`; delete it to resume.
