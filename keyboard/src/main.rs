@@ -368,11 +368,9 @@ impl Keyboard {
                 // screen's workspaces back. Run it in its own session so it
                 // outlives this process, and drop the pid record first so the
                 // gap goes whatever the timing.
-                let home = std::env::var_os("HOME").unwrap_or_default();
-                let script = std::path::Path::new(&home).join(".config/zenbook/zenbook-duo-osk");
                 let detached = Command::new("setsid")
                     .arg("-f")
-                    .arg(script)
+                    .arg(osk_script())
                     .arg("close")
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
@@ -678,15 +676,32 @@ fn draw_legend(frame: &mut Frame, rect: Rectangle, k: &Placed, kb: &Keyboard, un
 /// which monitors.lua ignores; zenbook-duo-osk reloads Hyprland itself.
 fn announce(up: bool) {
     let file = pid_file();
-    if up {
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(&file, format!("{}\n", std::process::id()));
-    } else {
+    if !up {
         forget_pid();
+        let _ = Command::new("hyprctl").arg("reload").status();
+        return;
     }
-    let _ = Command::new("hyprctl").arg("reload").status();
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&file, format!("{}\n", std::process::id()));
+    // zenbook-duo-osk park applies the gap (reload) and moves workspaces off
+    // the bottom screen; doing it from here covers every way of starting.
+    let parked = Command::new("setsid")
+        .arg("-f")
+        .arg(osk_script())
+        .arg("park")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    if parked.is_err() {
+        let _ = Command::new("hyprctl").arg("reload").status();
+    }
+}
+
+fn osk_script() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config/zenbook/zenbook-duo-osk")
 }
 
 fn pid_file() -> std::path::PathBuf {

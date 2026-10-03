@@ -12,6 +12,7 @@
 # Hyprland to apply or drop it.
 #
 # Usage: zenbook-duo-osk [toggle|open|close]   (default: toggle)
+#        zenbook-duo-osk park   (run by the keyboard itself on start)
 
 KEYBOARD="$HOME/.config/zenbook/zenbook-duo-keyboard"
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook/osk-workspaces"
@@ -34,17 +35,21 @@ running() { pgrep -x zenbook-duo-key >/dev/null; }
 open() {
   running && return
   hyprctl -j monitors | jq -e --arg m "$BOTTOM" 'any(.name == $m)' >/dev/null || return # docked
-  local top_ws bottom_ws others
+  # The keyboard records its pid and calls `park` itself on start, so every
+  # way of starting it moves the workspaces off the bottom screen.
+  setsid "$KEYBOARD" >/dev/null 2>&1 </dev/null &
+}
+
+# Called by the keyboard on start, after it has recorded its pid: apply the
+# panel gap and move the bottom screen's workspaces to the top screen.
+park() {
+  hyprctl -j monitors | jq -e --arg m "$BOTTOM" 'any(.name == $m)' >/dev/null || return # docked
+  local top_ws others
   top_ws=$(active_on "$TOP")
-  bottom_ws=$(active_on "$BOTTOM")
   others=$(hyprctl -j workspaces | jq -r --arg m "$BOTTOM" '.[] | select(.monitor == $m and .id > 0) | .id')
   mkdir -p "${STATE%/*}"
-  printf '%s\n' "$bottom_ws" $others >"$STATE"
-
-  setsid "$KEYBOARD" >/dev/null 2>&1 </dev/null &
-  # The keyboard records its pid and reloads Hyprland (panel gap) on start.
-  for _ in $(seq 20); do running && break; sleep 0.05; done
-
+  printf '%s\n' $others >"$STATE"
+  hyprctl reload >/dev/null 2>&1 # panel gap on, workspace-2 rule off
   focus_monitor "$BOTTOM"
   focus_workspace "$PARKING"
   for ws in $others; do move_workspace "$ws" "$TOP"; done
@@ -76,7 +81,8 @@ close() {
 
 case "${1:-toggle}" in
   open) open ;;
+  park) park ;;
   close) close ;;
   toggle) if running; then close; else open; fi ;;
-  *) echo "usage: zenbook-duo-osk [toggle|open|close]" >&2; exit 2 ;;
+  *) echo "usage: zenbook-duo-osk [toggle|open|close|park]" >&2; exit 2 ;;
 esac

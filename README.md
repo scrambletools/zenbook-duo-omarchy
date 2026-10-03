@@ -320,9 +320,11 @@ F-row and the arrow cluster match it.
 It is a small Rust program in `keyboard/` (iced, drawn with the CPU renderer,
 about 4 MB), which setup.sh builds with `cargo` and installs to
 `~/.config/zenbook/zenbook-duo-keyboard`. `scripts/zenbook-duo-osk
-[toggle|open|close]` opens and closes it and handles the workspaces and the
-gap; the bar button, Super + Ctrl + K and the keyboard's own close key all go
-through it. Its last run is traced to `$XDG_RUNTIME_DIR/zenbook-duo-osk.log`. It types through one persistent
+[toggle|open|close]` opens and closes it; the bar button, Super + Ctrl + K
+and the keyboard's own close key all go through it. On start the keyboard
+records its pid and runs the script's `park` step itself (gap on, workspaces
+moved), so it behaves the same however it is launched. The script's last run
+is traced to `$XDG_RUNTIME_DIR/zenbook-duo-osk.log`. It types through one persistent
 Wayland virtual keyboard with a standard US keymap, sending each key on its
 real keyboard code (Shift held for shifted characters) like a physical
 keyboard, so Hyprland's key bindings see the same keys apps do. The
