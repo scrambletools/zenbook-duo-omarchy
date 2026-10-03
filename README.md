@@ -20,7 +20,7 @@ In order of how much you'd miss them:
 | # | Feature | Without it |
 |---|---|---|
 | 2 | Sound | no sound card at all ("Dummy Output") |
-| 3 | Displays: upright top screen, stacked layout, correct mouse pointer | top screen upside down; pointer mirrored |
+| 3 | Displays: upright top screen, stacked layout, correct mouse pointer, bar on the top screen only | top screen upside down; pointer mirrored; a second bar on the bottom screen |
 | 4 | Screen brightness, on both screens | brightness keys and slider change nothing |
 | 5 | Reliable boot | some boots hang with a dark top screen after login |
 | 6 | Touchscreens, each mapped to its own screen | top touchscreen dead, kernel oops, shutdown hangs |
@@ -128,6 +128,22 @@ unrotated coordinates, so on the top screen the pointer moves mirrored.
 `hypr/input.lua` draws the cursor in software (`cursor:no_hardware_cursors`),
 which rotates with the picture. Drop it once Hyprland rotates the cursor
 plane itself.
+
+**Bar on the top screen only.** Omarchy's bar puts a panel on every screen,
+and the bottom screen doesn't need one. Until Omarchy has a setting for it
+([PR #6501](https://github.com/omacom/omarchy/pull/6501), `bar.screens`),
+`scripts/zenbook-duo-bar` clones the built-in bar (`omarchy plugin clone
+omarchy.bar`, which becomes "My Bar") and filters its per-screen panels to
+every screen except `eDP-2`, so an external monitor still gets a bar.
+setup.sh installs it as an Omarchy **post-update hook**: during every
+`omarchy update` it asks to rebuild the clone from the freshly updated bar,
+so the bar keeps getting Omarchy's changes (`omarchy update -y` rebuilds
+without asking). If the bar's code has changed so the filter no longer
+applies, it switches back to the standard bar and shows a notification. Run
+`~/.config/omarchy/hooks/post-update.d/zenbook-duo-bar remove` to go back to
+the standard bar by hand. Updates that bypass `omarchy update` (a plain
+`pacman -Syu`) don't trigger the hook, so the clone waits for the next
+`omarchy update`.
 
 ## 4. Brightness
 

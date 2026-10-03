@@ -51,6 +51,10 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-auto-brightness" \
 install -D -m 0755 "$HERE/scripts/zenbook-duo-osk" \
   "$HOME/.config/zenbook/zenbook-duo-osk"
 
+echo "==> Bar: keep the Omarchy bar off the bottom screen (rebuilt on every omarchy update)"
+omarchy hook install post-update "$HERE/scripts/zenbook-duo-bar" >/dev/null &&
+  bash "$HERE/scripts/zenbook-duo-bar" refresh
+
 echo "==> On-screen keyboard (Rust): building keyboard/, adding its bar button"
 # keyboard/mise.toml pins the toolchain for mise users; any stable cargo works.
 if command -v cargo >/dev/null; then

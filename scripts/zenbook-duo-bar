@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Keep the Omarchy bar off the Zenbook Duo's bottom screen (eDP-2), while
+# still getting Omarchy's bar updates.
+#
+# The built-in bar puts a panel on every screen. Until Omarchy has a setting
+# for this (omacom/omarchy PR #6501), this clones the built-in bar
+# (`omarchy plugin clone omarchy.bar`) and filters its per-screen panels to
+# every screen except eDP-2. Installed as an Omarchy post-update hook, it
+# rebuilds the clone from the freshly updated bar on every `omarchy update`,
+# so the clone never falls behind. If the patch no longer applies (the bar's
+# code changed), it switches back to the built-in bar and says so.
+#
+# Usage: zenbook-duo-bar [refresh|remove]   (refresh is the default)
+
+set -uo pipefail
+
+SKIP_SCREEN=eDP-2
+CLONE_ID="${USER:-$(id -un)}.bar"
+CLONE_DIR="$HOME/.config/omarchy/plugins/$CLONE_ID"
+# Every per-screen panel in Bar.qml is a Variants block on this model line.
+MODEL_LINE='^([[:space:]]*model:[[:space:]]*)(Quickshell\.screens|root\.realScreens)[[:space:]]*$'
+EXPECTED_PANELS=3
+
+say() { echo "    $*"; }
+
+use_builtin() {
+  omarchy bar use omarchy.bar >/dev/null 2>&1
+  rm -rf "$CLONE_DIR"
+}
+
+confirm() {
+  # `omarchy update -y` promises no questions; take that as a yes.
+  [[ -n ${OMARCHY_UPDATE_UNATTENDED:-} ]] && return 0
+  [[ -t 0 ]] || return 0
+  gum style --border normal --padding "1 2" \
+    "Zenbook Duo: refresh the one-screen bar?" \
+    "" \
+    "• Rebuilds your bar from the updated Omarchy bar, without the" \
+    "  bottom screen ($SKIP_SCREEN), so it keeps up with Omarchy" \
+    "• The bar blinks once while the shell restarts"
+  echo
+  gum confirm "Refresh the bar?"
+}
+
+refresh() {
+  echo "==> Zenbook Duo: refreshing the bar without the bottom screen"
+  if ! confirm; then
+    say "skipped; the bar stays as it was"
+    return 0
+  fi
+
+  # The clone command refuses to overwrite, and the old clone is the active
+  # bar: switch to the built-in one, drop the clone, clone afresh.
+  use_builtin
+  if ! omarchy plugin clone omarchy.bar >/dev/null 2>&1; then
+    say "cloning the Omarchy bar failed; using the standard bar"
+    use_builtin
+    return 0
+  fi
+  omarchy-notification-dismiss "Editing Cloned Plugin" >/dev/null 2>&1 || true
+
+  local bar="$CLONE_DIR/Bar.qml" found
+  found=$(grep -cE "$MODEL_LINE" "$bar" 2>/dev/null || true)
+  if [[ $found != "$EXPECTED_PANELS" ]]; then
+    say "the Omarchy bar has changed ($found per-screen panels found, $EXPECTED_PANELS expected);"
+    say "switched back to the standard bar, which shows on both screens"
+    use_builtin
+    omarchy-notification-send -u critical "Zenbook Duo bar" \
+      "The Omarchy bar changed, so the bottom-screen filter no longer applies. Using the standard bar for now." \
+      >/dev/null 2>&1 || true
+    return 0
+  fi
+  sed -i -E "s/$MODEL_LINE/\\1(\\2).filter(screen => screen.name !== \"$SKIP_SCREEN\")/" "$bar"
+
+  # A running shell can keep a plugin's previous code; restart to load it.
+  omarchy restart shell >/dev/null 2>&1 || true
+  say "done: bar on every screen except $SKIP_SCREEN"
+}
+
+case "${1:-refresh}" in
+  refresh) refresh ;;
+  remove)
+    use_builtin
+    omarchy restart shell >/dev/null 2>&1 || true
+    echo "Back to the standard Omarchy bar on every screen."
+    ;;
+  *) echo "usage: zenbook-duo-bar [refresh|remove]" >&2; exit 2 ;;
+esac
