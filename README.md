@@ -389,7 +389,9 @@ UX8407AA.)
 
 The firmware advertises a **ghost Realtek RT722 codec** on SoundWire link 3
 that isn't physically fitted, next to the real Cirrus CS42L43. On kernels
-< 7.2 the generic `sof_sdw` machine driver builds a DAI link for both, hits a
+without the upstream quirk (still the case for Arch 7.2.3 and Omarchy's
+`linux-omarchy` 7.2.5) the generic `sof_sdw` machine driver builds a DAI
+link for both, hits a
 duplicate `SDW3-Playback-SimpleJack`, and the whole probe aborts with error
 -12 — so **no ALSA card registers** and PipeWire shows only "Dummy Output".
 Diagnose with:
@@ -399,8 +401,8 @@ cat /proc/asound/cards            # "no soundcards" = this bug
 journalctl -k -b | grep -E 'SimpleJack|sof_sdw'
 ```
 
-`audio/` contains a DKMS overlay (`zenbook-duo-sof-sdw-3.0.0/`) that rebuilds
-the `snd-soc-sof-sdw` module with a narrow filter: it drops only a device
+`audio/` contains a DKMS overlay that rebuilds the `snd-soc-sof-sdw` module
+with a narrow filter: it drops only a device
 with the RT722's ID (mfg `0x025d`, part `0x0722`) that the SoundWire core has
 already marked UNATTACHED, and only on this board (DMI-gated to `UX8407AA`).
 It is adapted from
@@ -409,23 +411,42 @@ It is adapted from
 a DMI entry for `UX8407AA`, and `LLVM=1` removed from `dkms.conf` — the stock
 Arch kernel is GCC-built and clang chokes on its cflags.
 
+The overlay is a patched copy of the kernel's own `sof_sdw.c`, so it has to
+match the kernel it is built for, and there are two versions:
+
+| Version | Kernel | Source |
+|---|---|---|
+| `zenbook-duo-sof-sdw-3.0.0/` | stock Arch `linux` | 7.1-era `sof_sdw.c` |
+| `zenbook-duo-sof-sdw-3.1.0/` | Omarchy `linux-omarchy` 7.2.5 | v7.2.5 `sof_sdw.c` plus the sof_sdw hunks of Omarchy's sound patches (`0510`–`0514` in [omacom/omarchy-pkgs](https://github.com/omacom/omarchy-pkgs)) |
+
+Omarchy's sound patches change the `soc_sdw_utils` API
+(`asoc_sdw_parse_sdw_endpoints()` takes `dev, ctx` instead of `card`), so
+3.0.0 fails to build there and DKMS silently leaves the stock, broken module
+in place. That is how Omarchy's switch to its own kernel brings "Dummy
+Output" back. The ghost filter itself is identical in both versions.
+
 Install with `audio/install-audio-fix.sh` (run via `pkexec`/sudo; setup.sh
-does this). It installs `dkms` + headers, builds the module, and regenerates
-the initramfs. Reboot afterwards.
+does this). It picks the version for the running kernel, installs `dkms` +
+headers, builds the module, and regenerates the initramfs. Reboot afterwards.
+After a kernel switch, boot the new kernel and run it again.
 
 **This is a temporary shim.** The permanent fix — a `ghost_realtek` DMI
 quirk for `UX8407AA` in `drivers/soundwire/dmi-quirks.c` — is already in
-Linus' tree and expected in Linux 7.2+. The install script detects a fixed
-kernel and refuses to install. Once your kernel has it, remove the overlay:
+Linus' tree, but not yet in the 7.2 kernels Arch and Omarchy ship. The
+install script detects a fixed kernel and refuses to install. Once your
+kernel has it, remove the overlay:
 
 ```sh
 sudo dkms remove -m zenbook-duo-sof-sdw -v 3.0.0 --all
-sudo rm -rf /usr/src/zenbook-duo-sof-sdw-3.0.0
+sudo dkms remove -m zenbook-duo-sof-sdw -v 3.1.0 --all
+sudo rm -rf /usr/src/zenbook-duo-sof-sdw-3.*
 sudo limine-mkinitcpio
 ```
 
-Don't leave a stale overlay installed across major kernel upgrades — it's
-built from 7.1-era sources and may stop compiling or misbehave.
+Each version only builds against the kernel it was made from. After any
+kernel update, check `dkms status` and `wpctl status`: a version missing
+from `dkms status` for the new kernel, or a "Dummy Output" sink, means the
+overlay needs porting to that kernel's `sof_sdw.c`.
 
 Everything else audio-related is already upstream on a current Arch install:
 `alsa-ucm-conf ≥ 1.2.16` ships the HiFi UCM profile and `linux-firmware`
@@ -488,11 +509,11 @@ that is still bonded, do not hold the Bluetooth key — a keypress is enough.
 
 ### 6c. The keyboard's special function keys
 
-Volume up/down/mute on the F-row work out of the box (ordinary consumer-page
-keys). Four other F-row keys do not, docked or on Bluetooth:
+None of these F-row keys work out of the box, docked or on Bluetooth:
 
 | Key (F-row) | What it should do |
 |---|---|
+| Mute / volume down / volume up (F1 / F2 / F3) | Speaker mute and volume |
 | Display brightness down / up (F5 / F6) | Dim / brighten the **screens** — the same thing the Omarchy brightness slider does (needs the OLED fix from section 3a to be visible) |
 | Keyboard backlight (F4) | **Cycle the keyboard's own key backlight** through its levels (off, low, mid, high) |
 | Mic mute (F10) | Toggle the microphone |
@@ -504,7 +525,7 @@ found by capturing the raw HID traffic:
 
 - Until an ASUS driver has claimed the keyboard's **vendor interface** (the
   one whose report descriptor declares usage page `0xFF31`), the firmware
-  sends those keys as plain **F5/F6/F4/F10** and nothing at all with Fn held.
+  sends those keys as plain **F1/F2/F3/F5/F6/F4/F10** and nothing at all with Fn held.
 - Once `hid-asus` is bound to that interface *with its keyboard-backlight
   quirk*, the firmware switches to real ASUS hotkey reports: report id `0x5a`
   with one code byte (`0x20` display brightness up, `0x10` display
@@ -537,7 +558,7 @@ Three pieces, all installed by `setup.sh`:
    the backlight key cycles the LED levels, mic mute toggles the microphone. Unknown codes are logged
    (`journalctl -u zenbook-duo-fnkeys`) so new keys are easy to add.
 3. **`udev/61-zenbook-duo-keyboard.hwdb`** — belt and braces: maps the plain
-   F5/F6/F4/F10 scancodes to the same functions for this keyboard only, so
+   F1/F2/F3/F5/F6/F4/F10 scancodes to the same functions for this keyboard only, so
    the keys still work in the window before `hid-asus` binds. Harmless
    otherwise, since the firmware sends either the F-key or the hotkey, never
    both.
@@ -612,6 +633,6 @@ unlock prompt is on both screens (section 2b). Then:
 
 ## License
 
-MIT (see `LICENSE`). The exception is `audio/zenbook-duo-sof-sdw-3.0.0/`,
+MIT (see `LICENSE`). The exception is `audio/zenbook-duo-sof-sdw-*/`,
 which is a modified copy of a GPL-2.0 Linux kernel module and stays under
 that license; see its own sources for attribution.
