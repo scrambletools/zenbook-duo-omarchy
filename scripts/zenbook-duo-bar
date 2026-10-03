@@ -32,13 +32,8 @@ confirm() {
   # `omarchy update -y` promises no questions; take that as a yes.
   [[ -n ${OMARCHY_UPDATE_UNATTENDED:-} ]] && return 0
   [[ -t 0 ]] || return 0
-  gum style --border normal --padding "1 2" \
-    "Zenbook Duo: refresh the one-screen bar?" \
-    "" \
-    "• Rebuilds your bar from the updated Omarchy bar, without the" \
-    "  bottom screen ($SKIP_SCREEN), so it keeps up with Omarchy" \
-    "• The bar blinks once while the shell restarts"
-  echo
+  echo "    Rebuilds your bar from the updated Omarchy bar, without the bottom"
+  echo "    screen ($SKIP_SCREEN); the bar blinks once while the shell restarts."
   gum confirm "Refresh the bar?"
 }
 

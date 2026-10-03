@@ -136,7 +136,7 @@ and the bottom screen doesn't need one. Until Omarchy has a setting for it
 omarchy.bar`, which becomes "My Bar") and filters its per-screen panels to
 every screen except `eDP-2`, so an external monitor still gets a bar.
 setup.sh installs it as an Omarchy **post-update hook**: during every
-`omarchy update` it asks to rebuild the clone from the freshly updated bar,
+`omarchy update` it asks whether to rebuild the clone from the freshly updated bar,
 so the bar keeps getting Omarchy's changes (`omarchy update -y` rebuilds
 without asking). If the bar's code has changed so the filter no longer
 applies, it switches back to the standard bar and shows a notification. Run
