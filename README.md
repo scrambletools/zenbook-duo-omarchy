@@ -156,9 +156,10 @@ and the bottom screen doesn't need one. Until Omarchy has a setting for it
 omarchy.bar`, which becomes "My Bar") and filters its per-screen panels to
 every screen except `eDP-2`, so an external monitor still gets a bar.
 setup.sh installs it as an Omarchy **post-update hook**: during every
-`omarchy update` it asks whether to rebuild the clone from the freshly updated bar,
-so the bar keeps getting Omarchy's changes (`omarchy update -y` rebuilds
-without asking). If the bar's code has changed so the filter no longer
+`omarchy update` it asks whether to rebuild the clone from the freshly
+updated bar, so the bar keeps getting Omarchy's changes (`omarchy update -y`
+rebuilds without asking). Like Omarchy's own update prompt, the question is
+erased from the terminal once answered. If the bar's code has changed so the filter no longer
 applies, it switches back to the standard bar and shows a notification. Run
 `~/.config/omarchy/hooks/post-update.d/zenbook-duo-bar remove` to go back to
 the standard bar by hand. Updates that bypass `omarchy update` (a plain
@@ -484,6 +485,8 @@ bluetoothctl devices Paired | grep 'Zenbook Duo Keyboard'   # exactly one
 journalctl -k -b | grep 'ISH loader'         # "firmware loaded"
 cat /sys/bus/iio/devices/*/name     # includes accel_3d, als and hinge
 cat ~/.local/state/zenbook/rotation # current layout
+omarchy plugin list | grep -E '^\S+\.bar '  # your user.bar ("My Bar") enabled, omarchy.bar disabled
+ls ~/.config/omarchy/hooks/*.d/ | grep zenbook   # zenbook-duo-bar, -kernel-check (post-update), -health (post-boot)
 ```
 
 Then:
@@ -491,8 +494,8 @@ Then:
 - Play something: sound comes from the speakers.
 - F5 / F6 change brightness on both screens.
 - Touch each screen: the cursor reacts on the screen you touched.
-- Dock the keyboard: the bottom screen turns off within about 2 s and comes
-  back when you lift the keyboard away.
+- Dock the keyboard: the bottom screen turns off within about 2 s, and comes
+  back a few seconds after you lift the keyboard away, with no bar on it.
 - Volume, mute, keyboard backlight and mic-mute keys work, docked and over
   Bluetooth.
 - Lifted off, the keyboard types over Bluetooth within a few seconds (if
