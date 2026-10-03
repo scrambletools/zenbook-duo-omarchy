@@ -27,7 +27,7 @@ DISABLE_RULE='hl.monitor({ output = "eDP-2", disabled = true })'
 
 BOTTOM_BL="card0-eDP-2-backlight"
 TOP_BL="/sys/class/backlight/intel_backlight"
-# Set once the bottom panel's PHY is found wedged (README section 2b); the
+# Set once the bottom panel's PHY is found wedged (README section 7); the
 # panel is then left disabled for the rest of this boot.
 WEDGED="${XDG_RUNTIME_DIR:-/tmp}/zenbook-duo-screen-watch.wedged"
 WEDGE_PATTERN='PHY B failed|DDI BUF B|pipe B\] flip_done timed out'
@@ -66,7 +66,7 @@ shutting_down() {
 }
 
 # The xe driver cannot bring the bottom panel's PHY back up when the firmware
-# did not light it at power-on (README section 2b). Once that has failed,
+# did not light it at power-on (README section 7). Once that has failed,
 # every further modeset on that pipe stalls the compositor for 10 s, so stop
 # touching the panel until the next boot and say so once.
 wedged_in_log() {   # [since], default: the whole boot

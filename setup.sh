@@ -11,7 +11,7 @@ HERE="$(dirname "$(readlink -f "$0")")"
 echo "==> Installing script dependencies (brightnessctl, inotify-tools, iio-sensor-proxy)"
 pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive
 
-echo "==> Keyboard: hid-asus rebind and the Fn-key bridge (section 6c)"
+echo "==> Keyboard: hid-asus rebind and the Fn-key bridge (section 8)"
 # The rm cleans up an older version of this package, which also shipped an
 # F-key remap (hwdb) and a hidraw backlight tool; hid-asus makes both redundant.
 pkexec bash -c "rm -f /etc/udev/hwdb.d/61-zenbook-duo-keyboard.hwdb \
@@ -95,8 +95,8 @@ for f in monitors input autostart bindings; do
 done
 
 echo
-echo "Done. Power off, lift the keyboard off the laptop, and power on (README section 2b)."
-echo "Verification steps are in README section 8."
+echo "Done. Power off, lift the keyboard off the laptop, and power on (README section 7)."
+echo "Verification steps are in README section 13."
 if (( ${#skipped[@]} )); then
   echo "Skipped Hyprland blocks, to merge by hand from hypr/: ${skipped[*]}"
 fi
