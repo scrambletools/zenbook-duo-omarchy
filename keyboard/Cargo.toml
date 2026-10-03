@@ -8,10 +8,12 @@ license = "MIT"
 [dependencies]
 # Layer-shell surface: takes touch and pointer input but never keyboard focus.
 iced_layershell = { version = "0.19", default-features = false }
-iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool", "canvas"] }
-# Virtual pointer for the touchpad (zwlr_virtual_pointer_v1).
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "crisp", "smol", "canvas"] }
+# Virtual keyboard (zwp_virtual_keyboard_v1) and pointer (zwlr_virtual_pointer_v1)
+# on one persistent connection: no process per key.
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # Not used directly: iced_layershell 0.19.1's devtools crate does not build
 # against winit-core 0.31.0-beta.3, so hold the whole tree at beta.2.
 winit-core = "=0.31.0-beta.2"

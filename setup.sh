@@ -9,7 +9,7 @@ set -euo pipefail
 HERE="$(dirname "$(readlink -f "$0")")"
 
 echo "==> Installing script dependencies (brightnessctl, inotify-tools, iio-sensor-proxy)"
-pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive wtype
+pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive
 
 echo "==> Keyboard: hid-asus rebind and the Fn-key bridge (section 8)"
 # The rm cleans up an older version of this package, which also shipped an
@@ -49,11 +49,15 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-rotate-watch" \
 install -D -m 0755 "$HERE/scripts/zenbook-duo-auto-brightness" \
   "$HOME/.config/zenbook/zenbook-duo-auto-brightness"
 
-echo "==> On-screen keyboard (Rust): building keyboard/"
+echo "==> On-screen keyboard (Rust): building keyboard/, adding its bar button"
 if command -v cargo >/dev/null; then
   (cd "$HERE/keyboard" && cargo build --release --locked) &&
     install -D -m 0755 "$HERE/keyboard/target/release/zenbook-duo-keyboard" \
-      "$HOME/.config/zenbook/zenbook-duo-keyboard"
+      "$HOME/.config/zenbook/zenbook-duo-keyboard" &&
+    mkdir -p "$HOME/.config/omarchy/plugins" &&
+    ln -sfn "$HERE/omarchy-plugin" \
+      "$HOME/.config/omarchy/plugins/io.github.scrambletools.zenbook-duo-keyboard" &&
+    omarchy bar put io.github.scrambletools.zenbook-duo-keyboard
 else
   echo "    cargo not found; install Rust (e.g. mise use rust@stable) and re-run to get it"
 fi

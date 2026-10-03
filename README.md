@@ -286,15 +286,19 @@ any key; don't hold the Bluetooth key.
 
 ## 10. On-screen keyboard and touchpad
 
-**Super + Ctrl + K** fills the bottom screen with a copy of the detachable
-keyboard and its touchpad, like ASUS's Windows virtual keyboard; press it
-again, or tap the keyboard icon left of DEL/INS, to close it. Key positions
+The keyboard button in the Omarchy bar, or **Super + Ctrl + K**, fills the
+bottom screen with a copy of the detachable keyboard and its touchpad, like
+ASUS's Windows virtual keyboard; tap the button or press the keys again, or
+tap the keyboard icon left of DEL/INS, to close it. The bar button only
+appears while the physical keyboard is undocked (the bottom screen is on),
+and lights up while the on-screen keyboard is showing. Key positions
 are measured from a photo of the real keyboard, so the layout, the half-height
 F-row and the arrow cluster match it.
 
 - **Typing.** Taps type into the window that had focus: the keyboard is a
   Wayland layer-shell surface that takes touch but never keyboard focus.
-  Keys fire on touch. Shift, Ctrl, Alt and Super latch for the next key
+  Keys fire on touch, and held keys repeat after half a second (letters,
+  Backspace, arrows, Enter, F-row). Shift, Ctrl, Alt and Super latch for the next key
   (tap again to unlatch); Caps toggles; Fn latches the F-row to F1–F12 and
   the arrows to Home / Page Up / Page Down / End. The F-row otherwise sends
   the media functions, as on the physical keyboard, and the two keys left of
@@ -304,8 +308,13 @@ F-row and the arrow cluster match it.
 
 It is a small Rust program in `keyboard/` (iced, drawn with the CPU renderer,
 about 4 MB), which setup.sh builds with `cargo` and installs to
-`~/.config/zenbook/zenbook-duo-keyboard`. Keys are typed with `wtype`; the
+`~/.config/zenbook/zenbook-duo-keyboard`. It types through one persistent
+Wayland virtual keyboard with a standard US keymap, sending each key on its
+real keyboard code (Shift held for shifted characters) like a physical
+keyboard, so Hyprland's key bindings see the same keys apps do. The
 touchpad uses Wayland's virtual-pointer protocol. No root access is needed.
+The bar button is an Omarchy shell plugin in `omarchy-plugin/`, which setup.sh
+links into `~/.config/omarchy/plugins/` and adds to the bar.
 It only shows while the bottom screen is on, so with the keyboard undocked.
 
 ## 11. Auto-rotation and sharing mode

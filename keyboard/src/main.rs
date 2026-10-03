@@ -4,15 +4,15 @@
 //!
 //! It is a wlr layer-shell surface filling eDP-2: it gets touch and pointer
 //! input but never keyboard focus, so keys type into the window you were
-//! using. Keys are sent with `wtype` (virtual keyboard protocol, handles
-//! modifiers); the touchpad drives a zwlr virtual pointer. No root needed.
+//! using. Keys and touchpad go out through a persistent virtual keyboard and
+//! virtual pointer (see input.rs). No root needed.
 
-mod pointer;
+mod input;
 
 use std::collections::HashMap;
 use std::process::Command;
-use std::sync::mpsc::{self, Sender};
-use std::time::Instant;
+use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 use iced::alignment::Vertical;
 use iced::mouse;
@@ -24,7 +24,7 @@ use iced_layershell::reexport::{Anchor, KeyboardInteractivity, Layer};
 use iced_layershell::settings::{LayerShellSettings, Settings, StartMode};
 use iced_layershell::to_layer_message;
 
-use pointer::PointerCmd;
+use input::InputCmd;
 
 const OUTPUT: &str = "eDP-2";
 const ICONS: Font = Font::with_name("JetBrainsMono Nerd Font");
@@ -46,8 +46,8 @@ enum Action {
     Key(&'static str, &'static str),
     /// F-row key: media keysym, and the F-key Fn selects.
     FRow(&'static str, &'static str),
-    /// Send a fixed chord, e.g. the Copilot key.
-    Chord(&'static [&'static str], &'static str),
+    /// Send a fixed chord (modifier mask, keysym), e.g. the Copilot key.
+    Chord(u32, &'static str),
     Mod(Modifier),
     Caps,
     Fn,
@@ -64,12 +64,12 @@ enum Modifier {
 }
 
 impl Modifier {
-    fn wtype_name(self) -> &'static str {
+    fn mask(self) -> u32 {
         match self {
-            Modifier::Shift => "shift",
-            Modifier::Ctrl => "ctrl",
-            Modifier::Alt => "alt",
-            Modifier::Super => "logo",
+            Modifier::Shift => input::MOD_SHIFT,
+            Modifier::Ctrl => input::MOD_CTRL,
+            Modifier::Alt => input::MOD_ALT,
+            Modifier::Super => input::MOD_SUPER,
         }
     }
 }
@@ -221,7 +221,7 @@ const BOTTOM_KEYS: &[(f32, f32, KeyDef)] = &[
     (490.0, 558.0, key(0.0, Legend::Word("ALT"), Action::Mod(Modifier::Alt))),
     (568.0, 950.0, key(0.0, Legend::Blank, Action::Char("space", ' ', ' '))),
     (960.0, 1027.0, key(0.0, Legend::Word("ALT"), Action::Mod(Modifier::Alt))),
-    (1038.0, 1107.0, key(0.0, Legend::Icon('\u{f0674}', ""), Action::Chord(&["shift", "logo"], "F23"))),
+    (1038.0, 1107.0, key(0.0, Legend::Icon('\u{f0674}', ""), Action::Chord(input::MOD_SHIFT | input::MOD_SUPER, "F23"))),
 ];
 /// Arrow cluster: (left, right, top, bottom) in photo pixels.
 const ARROWS: &[((f32, f32, f32, f32), KeyDef)] = &[
@@ -278,7 +278,8 @@ fn build_layout() -> Vec<Placed> {
 enum Message {
     KeyDown(usize),
     KeyUp(usize),
-    Pointer(PointerCmd),
+    Tick(Instant),
+    Input(InputCmd),
 }
 
 struct Keyboard {
@@ -288,27 +289,29 @@ struct Keyboard {
     latched: Vec<Modifier>,
     caps: bool,
     fn_lock: bool,
-    typist: Sender<Vec<String>>,
-    pointer: Sender<PointerCmd>,
+    output: Sender<InputCmd>,
+    /// The deck as drawn with nothing pressed; only Fn changes it.
+    deck: canvas::Cache,
+    /// Key being held for auto-repeat: index, pressed at, last repeat.
+    repeat: Option<(usize, Instant, Instant)>,
 }
+
+/// Hold this long before a key repeats, then repeat at this interval
+/// (typical keyboard settings: 500 ms, ~30 per second).
+const REPEAT_DELAY: Duration = Duration::from_millis(500);
+const REPEAT_EVERY: Duration = Duration::from_millis(33);
 
 impl Keyboard {
     fn new() -> Self {
-        // One worker runs wtype calls in order, so fast taps never reorder.
-        let (typist, jobs) = mpsc::channel::<Vec<String>>();
-        std::thread::spawn(move || {
-            for args in jobs {
-                let _ = Command::new("wtype").args(&args).status();
-            }
-        });
         Keyboard {
             keys: build_layout(),
             held: Vec::new(),
             latched: Vec::new(),
             caps: false,
             fn_lock: false,
-            typist,
-            pointer: pointer::spawn(),
+            output: input::spawn(),
+            deck: canvas::Cache::new(),
+            repeat: None,
         }
     }
 
@@ -316,11 +319,30 @@ impl Keyboard {
         match message {
             Message::KeyDown(i) => {
                 self.held.push(i);
-                return self.press(self.keys[i].action);
+                let action = self.keys[i].action;
+                if matches!(action, Action::Char(..) | Action::Key(..) | Action::FRow(..)) {
+                    let now = Instant::now();
+                    self.repeat = Some((i, now, now));
+                }
+                return self.press(action);
             }
-            Message::KeyUp(i) => self.held.retain(|h| *h != i),
-            Message::Pointer(cmd) => {
-                let _ = self.pointer.send(cmd);
+            Message::KeyUp(i) => {
+                self.held.retain(|h| *h != i);
+                if self.repeat.is_some_and(|(r, ..)| r == i) {
+                    self.repeat = None;
+                }
+            }
+            Message::Tick(now) => {
+                if let Some((i, since, last)) = self.repeat
+                    && now.duration_since(since) >= REPEAT_DELAY
+                    && now.duration_since(last) >= REPEAT_EVERY
+                {
+                    self.repeat = Some((i, since, now));
+                    return self.press(self.keys[i].action);
+                }
+            }
+            Message::Input(cmd) => {
+                let _ = self.output.send(cmd);
             }
             _ => {}
         }
@@ -337,7 +359,10 @@ impl Keyboard {
                 }
             }
             Action::Caps => self.caps = !self.caps,
-            Action::Fn => self.fn_lock = !self.fn_lock,
+            Action::Fn => {
+                self.fn_lock = !self.fn_lock;
+                self.deck.clear(); // F-row labels change
+            }
             Action::Hide => return iced::exit(),
             Action::SwapScreens => {
                 let _ = Command::new("hyprctl")
@@ -350,8 +375,9 @@ impl Keyboard {
                     // depend on the active layout's shift level.
                     let shift = self.latched.contains(&Modifier::Shift);
                     let upper = shift ^ (self.caps && plain.is_ascii_alphabetic());
-                    let c = if upper { shifted } else { plain };
-                    self.send(vec!["--".into(), c.to_string()]);
+                    // Shift is held only where it changes the character.
+                    let mods = if upper && shifted != plain { input::MOD_SHIFT } else { 0 };
+                    self.send(sym, mods);
                 } else {
                     self.combo(sym);
                 }
@@ -365,36 +391,19 @@ impl Keyboard {
                 self.combo(if self.fn_lock { function } else { media });
                 self.latched.clear();
             }
-            Action::Chord(mods, sym) => {
-                let mut args: Vec<String> = Vec::new();
-                for m in mods {
-                    args.extend(["-M".into(), (*m).into()]);
-                }
-                args.extend(["-k".into(), sym.into()]);
-                for m in mods.iter().rev() {
-                    args.extend(["-m".into(), (*m).into()]);
-                }
-                self.send(args);
-            }
+            Action::Chord(mods, sym) => self.send(sym, mods),
         }
         iced::Task::none()
     }
 
-    /// Press the latched modifiers, tap `keysym`, release the modifiers.
-    fn combo(&self, keysym: &str) {
-        let mut args: Vec<String> = Vec::new();
-        for m in &self.latched {
-            args.extend(["-M".into(), m.wtype_name().into()]);
-        }
-        args.extend(["-k".into(), keysym.into()]);
-        for m in self.latched.iter().rev() {
-            args.extend(["-m".into(), m.wtype_name().into()]);
-        }
-        self.send(args);
+    /// Tap `keysym` with the latched modifiers held.
+    fn combo(&self, keysym: &'static str) {
+        let mods = self.latched.iter().fold(0, |m, l| m | l.mask());
+        self.send(keysym, mods);
     }
 
-    fn send(&self, args: Vec<String>) {
-        let _ = self.typist.send(args);
+    fn send(&self, keysym: &'static str, mods: u32) {
+        let _ = self.output.send(InputCmd::Key { keysym, mods });
     }
 
     fn lit(&self, action: Action) -> bool {
@@ -403,6 +412,13 @@ impl Keyboard {
             Action::Caps => self.caps,
             Action::Fn => self.fn_lock,
             _ => false,
+        }
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        match self.repeat {
+            Some(_) => iced::time::every(Duration::from_millis(10)).map(Message::Tick),
+            None => iced::Subscription::none(),
         }
     }
 
@@ -475,11 +491,11 @@ impl<'a> Deck<'a> {
             st.gesture = Some((t, most, far));
         }
         let cmd = if st.pad.len() >= 2 {
-            PointerCmd::Scroll(dy * SCROLL_SPEED * -1.0)
+            InputCmd::Scroll(dy * SCROLL_SPEED * -1.0)
         } else {
-            PointerCmd::Motion(dx * POINTER_SPEED, dy * POINTER_SPEED)
+            InputCmd::Motion(dx * POINTER_SPEED, dy * POINTER_SPEED)
         };
-        Some(canvas::Action::publish(Message::Pointer(cmd)).and_capture())
+        Some(canvas::Action::publish(Message::Input(cmd)).and_capture())
     }
 
     fn up(&self, st: &mut Fingers, id: u64) -> Option<canvas::Action<Message>> {
@@ -492,8 +508,8 @@ impl<'a> Deck<'a> {
         }
         let (t, most, moved) = st.gesture.take()?;
         if !moved && t.elapsed().as_millis() <= TAP_MAX_MS {
-            let button = if most >= 2 { pointer::BTN_RIGHT } else { pointer::BTN_LEFT };
-            return Some(canvas::Action::publish(Message::Pointer(PointerCmd::Click(button))).and_capture());
+            let button = if most >= 2 { input::BTN_RIGHT } else { input::BTN_LEFT };
+            return Some(canvas::Action::publish(Message::Input(InputCmd::Click(button))).and_capture());
         }
         Some(canvas::Action::capture())
     }
@@ -537,30 +553,35 @@ impl<'a> canvas::Program<Message> for Deck<'a> {
         _cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let size = bounds.size();
-        let mut frame = Frame::new(renderer, size);
-        frame.fill_rectangle(Point::ORIGIN, size, DECK_COLOR);
-
-        // Touchpad.
-        let pad = deck_rect(size, frac(PAD.0, PAD.1, PAD.2, PAD.3));
-        let r = 0.012 * size.height;
-        frame.fill(&Path::rounded_rectangle(pad.position(), pad.size(), r.into()), PAD_COLOR);
-
         let unit_h = size.height * (60.0 / (DECK.3 - DECK.1));
-        for (i, k) in self.kb.keys.iter().enumerate() {
-            let rect = deck_rect(size, k.rect);
-            let fill = if self.kb.held.contains(&i) {
-                KEY_PRESSED
-            } else if self.kb.lit(k.action) {
-                KEY_LIT
-            } else {
-                KEY_COLOR
-            };
-            let path = Path::rounded_rectangle(rect.position(), rect.size(), (0.1 * unit_h).into());
-            frame.fill(&path, fill);
-            draw_legend(&mut frame, rect, k, self.kb, unit_h);
+        let kb = self.kb;
+        let deck = kb.deck.draw(renderer, size, |frame| {
+            frame.fill_rectangle(Point::ORIGIN, size, DECK_COLOR);
+            let pad = deck_rect(size, frac(PAD.0, PAD.1, PAD.2, PAD.3));
+            let r = 0.012 * size.height;
+            frame.fill(&Path::rounded_rectangle(pad.position(), pad.size(), r.into()), PAD_COLOR);
+            for k in &kb.keys {
+                draw_key(frame, size, k, kb, unit_h, KEY_COLOR);
+            }
+        });
+        // Only pressed and latched keys are drawn per frame.
+        let mut frame = Frame::new(renderer, size);
+        for (i, k) in kb.keys.iter().enumerate() {
+            if kb.held.contains(&i) {
+                draw_key(&mut frame, size, k, kb, unit_h, KEY_PRESSED);
+            } else if kb.lit(k.action) {
+                draw_key(&mut frame, size, k, kb, unit_h, KEY_LIT);
+            }
         }
-        vec![frame.into_geometry()]
+        vec![deck, frame.into_geometry()]
     }
+}
+
+fn draw_key(frame: &mut Frame, size: Size, k: &Placed, kb: &Keyboard, unit_h: f32, fill: Color) {
+    let rect = deck_rect(size, k.rect);
+    let path = Path::rounded_rectangle(rect.position(), rect.size(), (0.1 * unit_h).into());
+    frame.fill(&path, fill);
+    draw_legend(frame, rect, k, kb, unit_h);
 }
 
 const DECK_COLOR: Color = Color::from_rgb8(0x56, 0x57, 0x5b);
@@ -631,6 +652,18 @@ fn namespace() -> String {
 }
 
 fn main() -> Result<(), iced_layershell::Error> {
+    // Test hook: `zenbook-duo-keyboard --type "text"` types text through the
+    // virtual keyboard into the focused window, without showing the deck.
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 3 && args[1] == "--type" {
+        let out = input::spawn();
+        for c in args[2].chars() {
+            let (keysym, mods) = input::char_key(c);
+            let _ = out.send(InputCmd::Key { keysym, mods });
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        return Ok(());
+    }
     // Software rendering: the deck is flat shapes and text, and skipping the
     // GPU renderer keeps start-up quick and memory low.
     if std::env::var_os("ICED_BACKEND").is_none() {
@@ -638,6 +671,7 @@ fn main() -> Result<(), iced_layershell::Error> {
         unsafe { std::env::set_var("ICED_BACKEND", "tiny-skia") };
     }
     iced_layershell::application(Keyboard::new, namespace, Keyboard::update, Keyboard::view)
+        .subscription(Keyboard::subscription)
         .settings(Settings {
             layer_settings: LayerShellSettings {
                 anchor: Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right,
