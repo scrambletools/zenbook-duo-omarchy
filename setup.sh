@@ -8,8 +8,8 @@
 set -euo pipefail
 HERE="$(dirname "$(readlink -f "$0")")"
 
-echo "==> Installing script dependencies (brightnessctl, inotify-tools, iio-sensor-proxy)"
-pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive
+echo "==> Installing script dependencies (brightnessctl, inotify-tools, iio-sensor-proxy, jq)"
+pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive jq
 
 echo "==> Keyboard: hid-asus rebind and the Fn-key bridge (section 8)"
 # The rm cleans up an older version of this package, which also shipped an
@@ -52,16 +52,22 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-osk" \
   "$HOME/.config/zenbook/zenbook-duo-osk"
 
 echo "==> On-screen keyboard (Rust): building keyboard/, adding its bar button"
+# keyboard/mise.toml pins the toolchain for mise users; any stable cargo works.
 if command -v cargo >/dev/null; then
-  (cd "$HERE/keyboard" && cargo build --release --locked) &&
+  if (cd "$HERE/keyboard" && cargo build --release --locked); then
     install -D -m 0755 "$HERE/keyboard/target/release/zenbook-duo-keyboard" \
-      "$HOME/.config/zenbook/zenbook-duo-keyboard" &&
-    mkdir -p "$HOME/.config/omarchy/plugins" &&
+      "$HOME/.config/zenbook/zenbook-duo-keyboard"
+    mkdir -p "$HOME/.config/omarchy/plugins"
     ln -sfn "$HERE/omarchy-plugin" \
-      "$HOME/.config/omarchy/plugins/io.github.scrambletools.zenbook-duo-keyboard" &&
+      "$HOME/.config/omarchy/plugins/io.github.scrambletools.zenbook-duo-keyboard"
     omarchy bar put io.github.scrambletools.zenbook-duo-keyboard
+    # A running shell can keep an edited plugin's old code; restart to load it.
+    omarchy restart shell >/dev/null 2>&1 || true
+  else
+    echo "    build failed; the on-screen keyboard is not installed (see the cargo output above)"
+  fi
 else
-  echo "    cargo not found; install Rust (e.g. mise use rust@stable) and re-run to get it"
+  echo "    cargo not found; install Rust (pacman -S rust, or mise use -g rust@stable) and re-run"
 fi
 
 echo "==> Sensors: ASUS sensor-hub firmware (auto-rotation and auto-brightness)"
@@ -71,47 +77,87 @@ echo "==> Audio: ghost-RT722 DKMS overlay (skips itself on fixed kernels)"
 pkexec bash "$HERE/audio/install-audio-fix.sh"
 
 echo "==> Hyprland config: Zenbook Duo blocks for ~/.config/hypr/ (asks before touching each file)"
-# Each block is appended once, between marker comments. A file that already
-# has the block (marker or the block's key line, from an earlier manual merge)
-# is left alone. Appending at the end also keeps the eDP rules after Omarchy's
-# catch-all monitor rule, so they win.
+# Each block lives between marker comments. A missing block is appended (at
+# the end, which also keeps the eDP rules after Omarchy's catch-all monitor
+# rule, so they win); a block between markers that differs from hypr/ is
+# replaced in place. A block merged by hand without markers is left alone,
+# with a note if it lacks something the current version needs.
 MARK_BEGIN="-- >>> zenbook-duo-omarchy >>>"
 MARK_END="-- <<< zenbook-duo-omarchy <<<"
+# A line identifying a hand-merged block, and one the current block contains.
 declare -A KEY_LINE=(
   [monitors]='output = "eDP-2"'
   [input]='rayd0002:00-2386:8c06'
   [autostart]='zenbook-duo-screen-watch'
   [bindings]='zenbook-duo-auto-brightness reset'
 )
+declare -A CURRENT=(
+  [monitors]='osk.pid'
+  [input]='hide_on_touch'
+  [autostart]='zenbook-duo-auto-brightness'
+  [bindings]='zenbook-duo-osk'
+)
+ask() {
+  local answer
+  if ! read -r -p "$1 [y/N] " answer </dev/tty 2>/dev/null; then
+    echo "    (no terminal to ask on)"
+    return 1
+  fi
+  [[ $answer == [yY]* ]]
+}
 skipped=()
 for f in monitors input autostart bindings; do
   src="$HERE/hypr/$f.lua"
   dst="$HOME/.config/hypr/$f.lua"
-  if [[ -f $dst ]] && grep -qF -e "$MARK_BEGIN" -e "${KEY_LINE[$f]}" "$dst"; then
-    echo "    $f.lua already has the Zenbook Duo block, leaving it alone"
+  if [[ -f $dst ]] && grep -qxF -e "$MARK_BEGIN" "$dst"; then
+    current=$(awk -v b="$MARK_BEGIN" -v e="$MARK_END" '$0==e{inside=0} inside{print} $0==b{inside=1}' "$dst")
+    if [[ $current == "$(cat "$src")" ]]; then
+      echo "    $f.lua: Zenbook Duo block up to date"
+      continue
+    fi
+    echo
+    echo "----- changes to the Zenbook Duo block in $dst -----"
+    diff <(printf '%s\n' "$current") "$src" || true
+    echo "-----"
+    if ask "Replace the block in $dst?"; then
+      tmp=$(mktemp)
+      awk -v b="$MARK_BEGIN" -v e="$MARK_END" -v src="$src" '
+        $0==b { print; while ((getline line < src) > 0) print line; skip=1; next }
+        $0==e { skip=0 }
+        !skip' "$dst" >"$tmp" && cat "$tmp" >"$dst"
+      rm -f "$tmp"
+      echo "    replaced"
+    else
+      skipped+=("$f")
+    fi
+    continue
+  fi
+  if [[ -f $dst ]] && grep -qF "${KEY_LINE[$f]}" "$dst"; then
+    if grep -qF "${CURRENT[$f]}" "$dst"; then
+      echo "    $f.lua: Zenbook Duo settings merged by hand, current"
+    else
+      echo "    $f.lua: Zenbook Duo settings merged by hand, but older than hypr/$f.lua; merge it by hand"
+      skipped+=("$f")
+    fi
     continue
   fi
   echo
   echo "----- to append to $dst -----"
   cat "$src"
   echo "-----"
-  if ! read -r -p "Append this block to $dst? [y/N] " answer </dev/tty 2>/dev/null; then
-    echo "    (no terminal to ask on)"
-    skipped+=("$f"); continue
-  fi
-  if [[ $answer == [yY]* ]]; then
+  if ask "Append this block to $dst?"; then
     mkdir -p "$(dirname "$dst")"
     { [[ -s $dst ]] && printf '\n'; printf '%s\n' "$MARK_BEGIN"; cat "$src"; printf '%s\n' "$MARK_END"; } >>"$dst"
     echo "    appended"
   else
-    echo "    skipped"
     skipped+=("$f")
   fi
 done
+hyprctl reload >/dev/null 2>&1 || true
 
 echo
 echo "Done. Power off, lift the keyboard off the laptop, and power on (README section 7)."
 echo "Verification steps are in README section 14."
 if (( ${#skipped[@]} )); then
-  echo "Skipped Hyprland blocks, to merge by hand from hypr/: ${skipped[*]}"
+  echo "Hyprland blocks not installed or not current, to merge by hand from hypr/: ${skipped[*]}"
 fi

@@ -46,11 +46,15 @@ Run it as your normal user; root steps go through `pkexec`. It installs:
 - ASUS's sensor-hub firmware, downloaded from ASUS and checked against
   pinned checksums (section 11)
 - the helper scripts, into `~/.config/zenbook/`
-- the on-screen keyboard, built from `keyboard/` if `cargo` is installed
-- four Hyprland blocks from `hypr/`, appended to `~/.config/hypr/monitors.lua`,
-  `input.lua`, `autostart.lua` and `bindings.lua`. It asks before touching
-  each file, and leaves a file alone if it already has its Zenbook block, so
-  after updating this package merge changed blocks from `hypr/` by hand.
+- the on-screen keyboard and its bar button, built from `keyboard/` if
+  `cargo` is installed (section 10)
+- four Hyprland blocks from `hypr/`, in `~/.config/hypr/monitors.lua`,
+  `input.lua`, `autostart.lua` and `bindings.lua`, between
+  `-- >>> zenbook-duo-omarchy >>>` marker comments. It asks before touching
+  each file: a missing block is appended, and a block that differs from the
+  one in `hypr/` is shown as a diff and replaced, so re-running setup.sh
+  after an update brings them up to date. Settings merged by hand without
+  the markers are left alone, with a note if they look older than `hypr/`.
 
 Then power off and power on with the keyboard lifted off. Section 14 lists
 checks for every feature.
@@ -286,52 +290,69 @@ any key; don't hold the Bluetooth key.
 
 ## 10. On-screen keyboard and touchpad
 
-The keyboard button in the Omarchy bar, or **Super + Ctrl + K**, fills the
-bottom screen with a copy of the detachable keyboard and its touchpad, like
-ASUS's Windows virtual keyboard; tap the button or press the keys again, or
-tap the keyboard icon left of DEL/INS, to close it. The bar button only
-appears while the physical keyboard is undocked (the bottom screen is on),
-and lights up while the on-screen keyboard is showing. Key positions
-are measured from a photo of the real keyboard, so the layout, the half-height
-F-row and the arrow cluster match it.
+With the physical keyboard lifted off, the bottom screen can show a copy of
+the detachable keyboard and its touchpad, like ASUS's Windows virtual
+keyboard. Key positions are measured from a photo of the real keyboard, so
+the layout, the half-height F-row and the arrow cluster match it.
 
-- **Typing.** Taps type into the window that had focus: the keyboard is a
-  Wayland layer-shell surface that takes touch but never keyboard focus.
-  Keys fire on touch, and held keys repeat after half a second (letters,
-  Backspace, arrows, Enter, F-row). Shift, Ctrl, Alt and Super latch for the next key
-  (tap again to unlatch); Caps toggles; Fn latches the F-row to F1–F12 and
-  the arrows to Home / Page Up / Page Down / End. The F-row otherwise sends
-  the media functions, as on the physical keyboard, and the two keys left of
-  DEL/INS close the keyboard and swap the two screens' workspaces.
-- **Touchpad.** One finger moves the pointer, a tap clicks, a two-finger tap
-  right-clicks, and a two-finger slide scrolls. It keeps the pointer on the
-  top screen. `hypr/input.lua` turns off Hyprland's `cursor:hide_on_touch`,
-  which would otherwise hide the cursor on every touch of the touchpad.
-- **The bottom screen is all keyboard while it is up.** Workspaces that were
-  on the bottom screen move to the top one, and the bottom screen shows an
-  empty named workspace no number key reaches, so nothing opens unseen under
-  the keyboard. `hypr/monitors.lua` also leaves a 100-pixel gap between the
-  screens in the layout, so the cursor can reach the top screen's last row
-  without its image spilling onto the bottom screen, and can't be moved
-  there at all. Closing the keyboard undoes all of it, and the bottom screen
-  shows workspace 2 again (`monitors.lua` binds workspace 2 to it whenever
-  the keyboard is down).
+**Opening and closing.** Tap the keyboard button in the Omarchy bar, or
+press **Super + Ctrl + K**; do the same, or tap the keyboard icon left of
+DEL/INS, to close it. The bar button only appears while the physical
+keyboard is undocked (the bottom screen is on), and lights up while the
+on-screen keyboard is showing.
 
-It is a small Rust program in `keyboard/` (iced, drawn with the CPU renderer,
-about 4 MB), which setup.sh builds with `cargo` and installs to
-`~/.config/zenbook/zenbook-duo-keyboard`. `scripts/zenbook-duo-osk
-[toggle|open|close]` opens and closes it; the bar button, Super + Ctrl + K
-and the keyboard's own close key all go through it. On start the keyboard
-records its pid and runs the script's `park` step itself (gap on, workspaces
-moved), so it behaves the same however it is launched. The script's last run
-is traced to `$XDG_RUNTIME_DIR/zenbook-duo-osk.log`. It types through one persistent
-Wayland virtual keyboard with a standard US keymap, sending each key on its
-real keyboard code (Shift held for shifted characters) like a physical
-keyboard, so Hyprland's key bindings see the same keys apps do. The
-touchpad uses Wayland's virtual-pointer protocol. No root access is needed.
-The bar button is an Omarchy shell plugin in `omarchy-plugin/`, which setup.sh
-links into `~/.config/omarchy/plugins/` and adds to the bar.
-It only shows while the bottom screen is on, so with the keyboard undocked.
+**Typing.** Taps type into the window that had focus. Keys fire on touch,
+and held keys repeat after half a second (letters, Backspace, arrows, Enter,
+F-row). Shift, Ctrl, Alt and Super latch for the next key (tap again to
+unlatch); Caps toggles; Fn latches the F-row to F1–F12 and the arrows to
+Home / Page Up / Page Down / End. Otherwise the F-row sends the media
+functions, as on the physical keyboard. The two keys left of DEL/INS close
+the keyboard and swap the two screens' workspaces.
+
+**Touchpad.** One finger moves the pointer, a tap clicks, a two-finger tap
+right-clicks, and a two-finger slide scrolls.
+
+**While it is up, the bottom screen is all keyboard:**
+
+- The cursor stays on the top screen. The touchpad's pointer is bound to the
+  top screen, and `hypr/monitors.lua` leaves a 100-pixel gap between the
+  screens in the layout, so the cursor reaches the top screen's last row
+  without its image spilling onto the bottom screen, and no mouse can move it
+  there.
+- Workspaces stay on the top screen. The bottom screen's workspaces move up,
+  and it shows an empty named workspace that no number key reaches, so
+  nothing opens unseen under the keyboard.
+- Closing the keyboard undoes both: the screens line up again and the bottom
+  screen shows workspace 2, which `monitors.lua` binds to it whenever the
+  keyboard is down.
+- `hypr/input.lua` turns off Hyprland's `cursor:hide_on_touch`, which would
+  otherwise hide the cursor on every touch of the touchpad (and so also when
+  you tap a touchscreen elsewhere).
+
+**How it is built.**
+
+| Piece | Does |
+|---|---|
+| `keyboard/` | The keyboard itself: a small Rust program (iced, CPU renderer, about 4 MB) drawn on a Wayland layer-shell surface, which takes touch but never keyboard focus. Keys go out through one persistent virtual keyboard with a standard US keymap, each on its real key code with Shift held for shifted characters, so Hyprland's key bindings see the same keys apps do. The touchpad is a virtual pointer. No root access. |
+| `scripts/zenbook-duo-osk` | `toggle` / `open` / `close`: what the bar button, Super + Ctrl + K and the close key run. On start the keyboard records its pid and runs the script's `park` step itself (gap on, workspaces moved up), so it behaves the same however it is launched. |
+| `omarchy-plugin/` | The bar button, an Omarchy shell plugin. |
+| `hypr/` blocks | Super + Ctrl + K (`bindings.lua`), the gap and the workspace-2 rule (`monitors.lua`), `hide_on_touch` (`input.lua`). |
+
+setup.sh builds `keyboard/` with `cargo` (install Rust with `pacman -S rust`,
+or `mise use -g rust@stable`; `keyboard/mise.toml` pins stable for mise
+users), installs it to `~/.config/zenbook/zenbook-duo-keyboard`, links the
+plugin into `~/.config/omarchy/plugins/`, adds it to the bar and restarts
+the Omarchy shell.
+
+**Limits and troubleshooting.**
+
+- It types with a US layout whatever your keyboard layout setting is.
+- It only shows while the bottom screen is on, so with the keyboard undocked.
+- If the layout or workspaces don't come back after closing it, the trace of
+  the last open or close is in `$XDG_RUNTIME_DIR/zenbook-duo-osk.log`, and
+  `~/.config/zenbook/zenbook-duo-osk close` restores them.
+- After editing the bar button, run `omarchy restart shell`: a running shell
+  can keep the old version.
 
 ## 11. Auto-rotation and sharing mode
 
