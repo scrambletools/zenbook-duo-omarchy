@@ -46,6 +46,8 @@ Run it as your normal user; root steps go through `pkexec`. It installs:
 - ASUS's sensor-hub firmware, downloaded from ASUS and checked against
   pinned checksums (section 11)
 - the helper scripts, into `~/.config/zenbook/`
+- Omarchy hooks for the bar (section 3), a kernel check after updates and a
+  health check after boot (below)
 - the on-screen keyboard and its bar button, built from `keyboard/` if
   `cargo` is installed (section 10)
 - four Hyprland blocks from `hypr/`, in `~/.config/hypr/monitors.lua`,
@@ -59,8 +61,26 @@ Run it as your normal user; root steps go through `pkexec`. It installs:
 Then power off and power on with the keyboard lifted off. Section 14 lists
 checks for every feature.
 
-After a kernel update, check sound first: the audio overlay has to match the
-kernel (section 2).
+**After updates and at boot,** two Omarchy hooks (installed by setup.sh)
+watch for the things that have actually broken on this machine:
+
+- **After `omarchy update`** (post-update hook `zenbook-duo-kernel-check`):
+  for each newly installed kernel, before you reboot into it, it checks that
+  the audio overlay built for it (retrying once) and warns, in the update
+  output and with a notification, if sound would be missing on it. It notes
+  when a new kernel's `hid-asus` knows the keyboard itself, and once every
+  installed kernel has the upstream audio fix (Linux 7.3) it offers to remove
+  the overlay. Kernels it has checked are remembered in
+  `~/.local/state/zenbook/kernels-checked`, so an update without a new kernel
+  prints just "no new kernel". It runs in the update's terminal and only asks
+  a question when there is something to remove (`omarchy update -y` never
+  asks and changes nothing).
+- **After boot** (post-boot hook `zenbook-duo-health`): in the background, it
+  waits for the sound card, the keyboard on `hid-asus` (when connected) and
+  the accelerometer, and sends a notification for any that don't come up.
+  Silent when all is well.
+
+Both live in `~/.config/omarchy/hooks/` alongside the bar's hook (section 3).
 
 ## 2. Sound
 

@@ -55,6 +55,10 @@ echo "==> Bar: keep the Omarchy bar off the bottom screen (rebuilt on every omar
 omarchy hook install post-update "$HERE/scripts/zenbook-duo-bar" >/dev/null &&
   bash "$HERE/scripts/zenbook-duo-bar" refresh
 
+echo "==> Checks: kernel check after omarchy update, health check after boot"
+omarchy hook install post-update "$HERE/scripts/zenbook-duo-kernel-check" >/dev/null
+omarchy hook install post-boot "$HERE/scripts/zenbook-duo-health" >/dev/null
+
 echo "==> On-screen keyboard (Rust): building keyboard/, adding its bar button"
 # keyboard/mise.toml pins the toolchain for mise users; any stable cargo works.
 if command -v cargo >/dev/null; then

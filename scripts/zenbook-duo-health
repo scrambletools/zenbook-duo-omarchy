@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Omarchy post-boot hook: check that the Zenbook Duo fixes came up, and send
+# a notification for each one that did not. Silent when all is well.
+#
+# - Sound card registered (audio overlay, README section 2)
+# - Keyboard on hid-asus when it is connected (README section 8)
+# - Accelerometer present (ASUS sensor-hub firmware, README section 11)
+#
+# Runs in the background, so it never holds up the other post-boot hooks,
+# and gives each part time to appear before calling it missing.
+
+notify() { omarchy-notification-send -u critical "Zenbook Duo" "$1" >/dev/null 2>&1 || true; }
+
+# Poll `check` every second for up to $1 seconds.
+within() {
+  local limit=$1
+  shift
+  for ((i = 0; i < limit; i++)); do
+    "$@" && return 0
+    sleep 1
+  done
+  return 1
+}
+
+sound_card() { grep -q sofsoundwire /proc/asound/cards 2>/dev/null; }
+
+keyboard_connected() { ls /sys/bus/hid/devices/ 2>/dev/null | grep -qiE '0B05:1CD[78]'; }
+
+keyboard_on_hid_asus() {
+  local d
+  for d in /sys/bus/hid/devices/*0B05:1CD[78]*; do
+    # The vendor interface declares usage page 0xFF31 (bytes 06 31 ff).
+    od -An -tx1 -v "$d/report_descriptor" 2>/dev/null | tr -d ' \n' | grep -q '0631ff' || continue
+    [[ $(basename "$(readlink "$d/driver")") == asus ]] && return 0
+  done
+  return 1
+}
+
+accelerometer() { grep -qx accel_3d /sys/bus/iio/devices/*/name 2>/dev/null; }
+
+check() {
+  within 20 sound_card ||
+    notify "No sound card: the audio overlay is missing for kernel $(uname -r). See README section 2."
+  if keyboard_connected && ! within 20 keyboard_on_hid_asus; then
+    notify "The keyboard is not on hid-asus, so its function keys and backlight will not work. Re-dock it, or see README section 8."
+  fi
+  within 30 accelerometer ||
+    notify "No accelerometer: the ASUS sensor-hub firmware did not load, so auto-rotation and auto-brightness are off. See README section 11."
+}
+
+check >/dev/null 2>&1 &
+disown

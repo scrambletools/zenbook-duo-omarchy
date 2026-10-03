@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Omarchy post-update hook: check newly installed kernels against the Zenbook
+# Duo fixes, before you reboot into them.
+#
+# - Audio overlay (README section 2): if it did not build for a new kernel,
+#   try once more, then warn that sound will be missing on that kernel until
+#   the overlay is ported. If every installed kernel has the upstream fix
+#   (Linux 7.3+), offer to remove the overlay.
+# - Keyboard (README section 8): note when hid-asus knows the keyboard itself,
+#   so the rebind helper may be redundant.
+#
+# Kernels already checked are remembered, so an update without a kernel
+# change prints one line and does nothing else.
+
+set -uo pipefail
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/zenbook/kernels-checked"
+OVERLAY=zenbook-duo-sof-sdw
+
+say() { echo "    $*"; }
+notify() { omarchy-notification-send -u critical "Zenbook Duo" "$1" >/dev/null 2>&1 || true; }
+
+ask() {
+  # `omarchy update -y` promises no questions: report, change nothing.
+  [[ -z ${OMARCHY_UPDATE_UNATTENDED:-} && -t 0 ]] || return 1
+  gum confirm "$1"
+}
+
+# Installed kernel packages (a pkgbase file marks a packaged kernel).
+kernels() {
+  local d
+  for d in /usr/lib/modules/*/; do
+    [[ -f $d/pkgbase ]] && basename "$d"
+  done
+}
+
+has_upstream_audio_fix() {
+  local mod
+  mod=$(modinfo -k "$1" -n soundwire_bus 2>/dev/null) || return 1
+  zstdcat -f "$mod" 2>/dev/null | strings | grep -q UX8407AA
+}
+
+overlay_built_for() {
+  dkms status -m "$OVERLAY" -k "$1" 2>/dev/null | grep -q ': installed'
+}
+
+# The overlay version that matches a kernel package (see audio/install-audio-fix.sh).
+overlay_version_for() {
+  case $(<"/usr/lib/modules/$1/pkgbase") in
+    linux-omarchy) echo 3.1.0 ;;
+    *) echo 3.0.0 ;;
+  esac
+}
+
+hid_asus_knows_keyboard() {
+  modinfo -k "$1" -F alias hid_asus 2>/dev/null | grep -qi 'v00000B05p00001CD[78]'
+}
+
+echo "==> Zenbook Duo: checking kernels against the hardware fixes"
+mkdir -p "${STATE%/*}"
+touch "$STATE"
+mapfile -t installed < <(kernels)
+new=()
+for k in "${installed[@]}"; do
+  grep -qxF "$k" "$STATE" || new+=("$k")
+done
+if (( ${#new[@]} == 0 )); then
+  say "no new kernel"
+  exit 0
+fi
+
+for k in "${new[@]}"; do
+  say "kernel $k:"
+  if has_upstream_audio_fix "$k"; then
+    say "  sound: has the upstream ghost-codec fix; the audio overlay is not needed"
+  elif overlay_built_for "$k"; then
+    say "  sound: audio overlay built"
+  else
+    ver=$(overlay_version_for "$k")
+    say "  sound: audio overlay $ver not built for this kernel; retrying"
+    if [[ -d /usr/src/$OVERLAY-$ver ]] && sudo dkms install -m "$OVERLAY" -v "$ver" -k "$k" >/dev/null 2>&1; then
+      say "  sound: audio overlay built"
+    else
+      say "  sound: WILL BE MISSING on this kernel (Dummy Output) until the overlay is"
+      say "         ported to its sof_sdw.c; see README section 2. The current kernel is unaffected."
+      notify "Kernel $k: the audio fix did not build, so there will be no sound after rebooting into it until the overlay is ported (README section 2)."
+    fi
+  fi
+  if hid_asus_knows_keyboard "$k"; then
+    say "  keyboard: hid-asus supports the keyboard itself; the rebind helper may be"
+    say "            redundant on this kernel (README section 8)"
+  fi
+  echo "$k" >>"$STATE"
+done
+
+# Remove the overlay only once every installed kernel has the upstream fix,
+# so a fallback kernel never loses sound.
+if dkms status -m "$OVERLAY" 2>/dev/null | grep -q .; then
+  all_fixed=1
+  for k in "${installed[@]}"; do
+    has_upstream_audio_fix "$k" || all_fixed=0
+  done
+  if (( all_fixed )); then
+    say "every installed kernel has the upstream audio fix; the overlay is now redundant"
+    if ask "Remove the Zenbook Duo audio overlay?"; then
+      for v in $(dkms status -m "$OVERLAY" | sed -E "s|^$OVERLAY/([^,]+),.*|\\1|" | sort -u); do
+        sudo dkms remove -m "$OVERLAY" -v "$v" --all >/dev/null 2>&1
+      done
+      sudo rm -rf /usr/src/"$OVERLAY"-*
+      sudo limine-mkinitcpio >/dev/null 2>&1
+      say "audio overlay removed"
+    else
+      say "left installed; remove it later with the steps in README section 2"
+    fi
+  fi
+fi
