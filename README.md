@@ -27,8 +27,9 @@ In order of how much you'd miss them:
 | 7 | Bottom screen turns off when the keyboard is docked | bottom screen stays on under the keyboard |
 | 8 | Keyboard function keys and keyboard backlight | volume, brightness, backlight and mic-mute keys do nothing |
 | 9 | Detached keyboard over Bluetooth | keyboard won't pair or reconnect |
-| 10 | Auto-rotation, and sharing mode when opened flat | screens never turn |
-| 11 | Auto-brightness from the light sensor | brightness ignores the room light |
+| 10 | On-screen keyboard and touchpad on the bottom screen | no keyboard when the physical one isn't with you |
+| 11 | Auto-rotation, and sharing mode when opened flat | screens never turn |
+| 12 | Auto-brightness from the light sensor | brightness ignores the room light |
 
 ## 1. Install
 
@@ -43,14 +44,15 @@ Run it as your normal user; root steps go through `pkexec`. It installs:
 - the touchscreen driver blacklist (`touchscreen/`)
 - the keyboard helper, Fn-key daemon and udev rule (`scripts/`, `udev/`)
 - ASUS's sensor-hub firmware, downloaded from ASUS and checked against
-  pinned checksums (section 10)
+  pinned checksums (section 11)
 - the helper scripts, into `~/.config/zenbook/`
+- the on-screen keyboard, built from `keyboard/` if `cargo` is installed
 - four Hyprland blocks from `hypr/`, appended to `~/.config/hypr/monitors.lua`,
   `input.lua`, `autostart.lua` and `bindings.lua`. It asks before touching
   each file, and leaves a file alone if it already has its Zenbook block, so
   after updating this package merge changed blocks from `hypr/` by hand.
 
-Then power off and power on with the keyboard lifted off. Section 13 lists
+Then power off and power on with the keyboard lifted off. Section 14 lists
 checks for every feature.
 
 After a kernel update, check sound first: the audio overlay has to match the
@@ -115,7 +117,7 @@ The parameter becomes redundant (harmless) once the kernel's
 
 **Layout.** `hypr/monitors.lua` places the bottom panel (`eDP-2`) directly
 below the top one: `eDP-1` at `0x0`, `eDP-2` at `0x900` (the panel height at
-scale 2). The same block holds the rotated layouts (section 10).
+scale 2). The same block holds the rotated layouts (section 11).
 
 **Mouse pointer.** Hyprland places the hardware cursor in the panel's
 unrotated coordinates, so on the top screen the pointer moves mirrored.
@@ -168,7 +170,7 @@ fixes that driver.
 **Mapping.** Two identical touchscreens confuse Hyprland's automatic
 mapping. `hypr/input.lua` binds each touchscreen and pen to its own panel
 (`rayd0001` to `eDP-1`, `rayd0002` to `eDP-2`), and rotates touch input
-along with its panel (section 10).
+along with its panel (section 11).
 
 ## 7. Docking the keyboard
 
@@ -212,7 +214,8 @@ the report and kernel logs are in `reference/xe-bug-report/`.
 | F4 | cycle the keyboard backlight (off, low, mid, high) |
 | F5 / F6 | screen brightness down / up |
 | F10 | mic mute |
-| Super + F5 | auto-brightness back to its default curve (section 11) |
+| Super + F5 | auto-brightness back to its default curve (section 12) |
+| Super + Ctrl + K | on-screen keyboard and touchpad (section 10) |
 
 The keyboard (USB `0b05:1cd7` docked, Bluetooth `0b05:1cd8` detached) isn't
 in the kernel's `hid-asus` driver yet, so out of the box it lands on the
@@ -281,7 +284,31 @@ It pairs, trusts and connects whatever appears under the keyboard's name,
 and removes the stale entries. To just *reconnect* a paired keyboard, press
 any key; don't hold the Bluetooth key.
 
-## 10. Auto-rotation and sharing mode
+## 10. On-screen keyboard and touchpad
+
+**Super + Ctrl + K** fills the bottom screen with a copy of the detachable
+keyboard and its touchpad, like ASUS's Windows virtual keyboard; press it
+again, or tap the keyboard icon left of DEL/INS, to close it. Key positions
+are measured from a photo of the real keyboard, so the layout, the half-height
+F-row and the arrow cluster match it.
+
+- **Typing.** Taps type into the window that had focus: the keyboard is a
+  Wayland layer-shell surface that takes touch but never keyboard focus.
+  Keys fire on touch. Shift, Ctrl, Alt and Super latch for the next key
+  (tap again to unlatch); Caps toggles; Fn latches the F-row to F1–F12 and
+  the arrows to Home / Page Up / Page Down / End. The F-row otherwise sends
+  the media functions, as on the physical keyboard, and the two keys left of
+  DEL/INS close the keyboard and swap the two screens' workspaces.
+- **Touchpad.** One finger moves the pointer, a tap clicks, a two-finger tap
+  right-clicks, and a two-finger slide scrolls.
+
+It is a small Rust program in `keyboard/` (iced, drawn with the CPU renderer,
+about 4 MB), which setup.sh builds with `cargo` and installs to
+`~/.config/zenbook/zenbook-duo-keyboard`. Keys are typed with `wtype`; the
+touchpad uses Wayland's virtual-pointer protocol. No root access is needed.
+It only shows while the bottom screen is on, so with the keyboard undocked.
+
+## 11. Auto-rotation and sharing mode
 
 Turn the laptop on its side and both screens rotate into a side-by-side
 book layout; turn it upside down and they swap. Lay it opened flat on a
@@ -325,11 +352,11 @@ use. Typical readings:
 To hold the current layout, create `~/.local/state/zenbook/rotation-lock`;
 delete it to resume.
 
-## 11. Auto-brightness
+## 12. Auto-brightness
 
 `scripts/zenbook-duo-auto-brightness` (started from `autostart.lua`) sets
 screen brightness from the ambient light sensor (same firmware as section
-10, read through `iio-sensor-proxy`); the brightness mirror (section 4)
+11, read through `iio-sensor-proxy`); the brightness mirror (section 4)
 carries it to the bottom screen.
 
 - **Curve:** about 8% in the dark, plus 22 points for every tenfold increase
@@ -345,7 +372,7 @@ carries it to the bottom screen.
 - **Pause:** create `~/.local/state/zenbook/auto-brightness-off`; delete it
   to resume.
 
-## 12. Kernel command line
+## 13. Kernel command line
 
 Drop-ins in `/etc/limine-entry-tool.d/`, installed by setup.sh:
 
@@ -359,7 +386,7 @@ Panel Self Refresh (PSR) needs no parameter; leave it at the driver
 default. On other bootloaders, add the same parameters to the kernel command
 line some other way.
 
-## 13. Verification
+## 14. Verification
 
 After `setup.sh` and powering on with the keyboard off:
 
@@ -388,6 +415,9 @@ Then:
   Bluetooth.
 - Lifted off, the keyboard types over Bluetooth within a few seconds (if
   not, section 9).
+- Super + Ctrl + K with the keyboard lifted off: the bottom screen shows the
+  on-screen keyboard; taps type into the focused window and the touchpad
+  moves the pointer.
 - Turn the laptop onto each side: both screens rotate, workspace 1 stays on
   the left, and touch lands where you touch.
 - Lay it opened flat on the table: the top screen turns around; tilt it up

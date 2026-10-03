@@ -9,7 +9,7 @@ set -euo pipefail
 HERE="$(dirname "$(readlink -f "$0")")"
 
 echo "==> Installing script dependencies (brightnessctl, inotify-tools, iio-sensor-proxy)"
-pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive
+pkexec pacman -S --needed --noconfirm brightnessctl inotify-tools iio-sensor-proxy libarchive wtype
 
 echo "==> Keyboard: hid-asus rebind and the Fn-key bridge (section 8)"
 # The rm cleans up an older version of this package, which also shipped an
@@ -48,6 +48,15 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-rotate-watch" \
   "$HOME/.config/zenbook/zenbook-duo-rotate-watch"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-auto-brightness" \
   "$HOME/.config/zenbook/zenbook-duo-auto-brightness"
+
+echo "==> On-screen keyboard (Rust): building keyboard/"
+if command -v cargo >/dev/null; then
+  (cd "$HERE/keyboard" && cargo build --release --locked) &&
+    install -D -m 0755 "$HERE/keyboard/target/release/zenbook-duo-keyboard" \
+      "$HOME/.config/zenbook/zenbook-duo-keyboard"
+else
+  echo "    cargo not found; install Rust (e.g. mise use rust@stable) and re-run to get it"
+fi
 
 echo "==> Sensors: ASUS sensor-hub firmware (auto-rotation and auto-brightness)"
 bash "$HERE/scripts/zenbook-duo-sensor-firmware" || echo "    sensor firmware failed; auto-rotation will stay off"
@@ -96,7 +105,7 @@ done
 
 echo
 echo "Done. Power off, lift the keyboard off the laptop, and power on (README section 7)."
-echo "Verification steps are in README section 13."
+echo "Verification steps are in README section 14."
 if (( ${#skipped[@]} )); then
   echo "Skipped Hyprland blocks, to merge by hand from hypr/: ${skipped[*]}"
 fi

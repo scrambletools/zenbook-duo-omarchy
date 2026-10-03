@@ -1,0 +1,24 @@
+[package]
+name = "zenbook-duo-keyboard"
+version = "0.1.0"
+edition = "2024"
+description = "On-screen keyboard for the Zenbook Duo's bottom screen"
+license = "MIT"
+
+[dependencies]
+# Layer-shell surface: takes touch and pointer input but never keyboard focus.
+iced_layershell = { version = "0.19", default-features = false }
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "crisp", "thread-pool", "canvas"] }
+# Virtual pointer for the touchpad (zwlr_virtual_pointer_v1).
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# Not used directly: iced_layershell 0.19.1's devtools crate does not build
+# against winit-core 0.31.0-beta.3, so hold the whole tree at beta.2.
+winit-core = "=0.31.0-beta.2"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
