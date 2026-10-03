@@ -401,8 +401,10 @@ carries it to the bottom panel.
   saved as an offset (`~/.local/state/zenbook/auto-brightness-offset`) and
   kept as the light changes. On first start it adopts the current
   brightness instead of jumping to the curve.
-- **Back to the default curve:** `~/.config/zenbook/zenbook-duo-auto-brightness reset`
-  forgets the offset; the running instance picks it up within a few seconds.
+- **Back to the default curve:** **Super + F5** (the display-brightness-down
+  key, bound in `hypr/bindings.lua`), or
+  `~/.config/zenbook/zenbook-duo-auto-brightness reset`, forgets the offset;
+  the running instance picks it up within a few seconds.
 - **Pause:** create `~/.local/state/zenbook/auto-brightness-off`; delete it to
   resume.
 
