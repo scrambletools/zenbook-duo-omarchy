@@ -652,12 +652,13 @@ The working machine also boots with these parameters (drop-ins in
   on these OLED panels; see section 3a.
 - `xe.enable_panel_replay=0` — **required** or some boots hang with a dark
   top screen; see section 2a.
-- `xe.enable_psr=0` — disables Panel Self Refresh on the Intel Xe driver,
-  a common cure for flicker/artifacts on eDP panels.
-- `rtc_cmos.use_acpi_alarm=1` — makes RTC wake alarms go through ACPI.
+- `rtc_cmos.use_acpi_alarm=1` — makes RTC wake alarms go through ACPI. Not
+  required by anything in this package; listed so a diff against your own
+  cmdline doesn't surprise you.
 
-The last two are not required by anything in this package; listed so a diff
-against your own cmdline doesn't surprise you.
+Panel Self Refresh needs no parameter. `xe.enable_psr=0` was tried early on,
+while the bottom panel's PHY problem (section 2b) was still unexplained, and
+turned out not to matter; the machine runs with PSR at the driver default.
 
 ## 8. Post-install verification
 
