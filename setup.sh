@@ -47,8 +47,10 @@ install -D -m 0755 "$HERE/scripts/zenbook-duo-kbd-backlight" \
   "$HOME/.config/zenbook/zenbook-duo-kbd-backlight"
 install -D -m 0755 "$HERE/scripts/zenbook-duo-rotate-watch" \
   "$HOME/.config/zenbook/zenbook-duo-rotate-watch"
+install -D -m 0755 "$HERE/scripts/zenbook-duo-auto-brightness" \
+  "$HOME/.config/zenbook/zenbook-duo-auto-brightness"
 
-echo "==> Sensors: ASUS sensor-hub firmware (accelerometer for auto-rotation)"
+echo "==> Sensors: ASUS sensor-hub firmware (auto-rotation and auto-brightness)"
 bash "$HERE/scripts/zenbook-duo-sensor-firmware" || echo "    sensor firmware failed; auto-rotation will stay off"
 
 echo "==> Audio: ghost-RT722 DKMS overlay (skips itself on fixed kernels)"

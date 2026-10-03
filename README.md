@@ -29,6 +29,7 @@ kernel/Omarchy has made one obsolete.
 | Brightness keys/slider change nothing on either screen | DPCD backlight kernel parameter | `boot/zenbook-duo-dpcd-backlight.conf` |
 | Bottom panel brightness stuck (often near 0) | brightness mirror | `scripts/zenbook-duo-brightness-sync`, `hypr/autostart.lua` |
 | Screens don't turn when the laptop is turned (no accelerometer) | ASUS sensor-hub firmware + iio-sensor-proxy + rotation watcher | `scripts/zenbook-duo-sensor-firmware`, `scripts/zenbook-duo-rotate-watch`, `hypr/monitors.lua`, `hypr/input.lua` |
+| Screen brightness doesn't follow the room light | ambient-light auto-brightness (same sensor firmware) | `scripts/zenbook-duo-auto-brightness`, `hypr/autostart.lua` |
 | Mouse pointer moves mirrored on the top screen | software cursor | `hypr/input.lua` |
 | Touch on one panel moves the cursor on the other | explicit touch→output mapping | `hypr/input.lua` |
 | Top touchscreen dead + kernel oops on first touch | blacklist `raydium_i2c_ts` | `touchscreen/zenbook-duo-touchscreen.conf` |
@@ -381,6 +382,29 @@ append it like the other Hyprland blocks.
 The proper fix is a two-line kernel patch adding both IDs to hid-asus
 with `QUIRK_USE_KBD_BACKLIGHT`; until that lands upstream, the hidraw
 tool keeps working on any kernel and simply becomes redundant.
+
+### 3d. Auto-brightness from the ambient light sensor
+
+The same ASUS sensor-hub firmware that enables auto-rotation (section 1d)
+also brings up an ambient light sensor, which `iio-sensor-proxy` reports in
+lux. `scripts/zenbook-duo-auto-brightness` (started from `autostart.lua`)
+sets the top panel's backlight from it, and the brightness mirror (3b)
+carries it to the bottom panel.
+
+- **Curve:** brightness follows the light on a logarithmic scale, about 8%
+  in the dark plus 22 points for every tenfold increase in light (so ~30% at
+  10 lux, ~52% at 100 lux, ~74% at 1000 lux).
+- **Smooth:** readings are smoothed, changes smaller than 4 points are
+  ignored, and new levels fade in over about a second.
+- **Manual changes win.** When the brightness keys, the Omarchy slider or
+  anything else changes the backlight, the difference from the curve is
+  saved as an offset (`~/.local/state/zenbook/auto-brightness-offset`) and
+  kept as the light changes. On first start it adopts the current
+  brightness instead of jumping to the curve.
+- **Back to the default curve:** `~/.config/zenbook/zenbook-duo-auto-brightness reset`
+  forgets the offset; the running instance picks it up within a few seconds.
+- **Pause:** create `~/.local/state/zenbook/auto-brightness-off`; delete it to
+  resume.
 
 ## 4. Touchscreens
 

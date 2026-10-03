@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Zenbook Duo: set screen brightness from the ambient light sensor.
+
+Reads lux from iio-sensor-proxy (`monitor-sensor --light`) and drives the
+top panel's backlight; zenbook-duo-brightness-sync mirrors it to the bottom
+panel. Brightness follows a logarithmic curve of the light level, fades to
+new levels instead of jumping, and ignores small changes.
+
+Manual adjustments win: when the brightness keys, slider or anything else
+change the backlight, the difference from the curve is kept as an offset
+(saved across restarts) and applied as the light changes.
+
+Needs: iio-sensor-proxy, brightnessctl, and the ASUS ISH firmware for the
+light sensor. Started from ~/.config/hypr/autostart.lua.
+Create ~/.local/state/zenbook/auto-brightness-off to pause it.
+
+`zenbook-duo-auto-brightness reset` forgets the learned offset, so brightness
+returns to the plain curve (the running instance picks it up within a few
+seconds).
+"""
+import fcntl, math, os, select, subprocess, sys, time
+
+DEVICE = "intel_backlight"
+STATE_DIR = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"), "zenbook")
+OFFSET_FILE = os.path.join(STATE_DIR, "auto-brightness-offset")
+PAUSE_FILE = os.path.join(STATE_DIR, "auto-brightness-off")
+
+MIN_PCT, MAX_PCT = 1.0, 100.0
+HYSTERESIS = 4.0      # percentage points before brightness follows the light
+EMA_ALPHA = 0.3       # smoothing of log10(lux) readings
+FADE_STEPS, FADE_S = 15, 1.2
+USER_HOLD_S = 5.0     # after a manual change, leave brightness alone this long
+
+
+def curve(lux):
+    """Percent brightness for a light level: ~8% in the dark, +22 per decade."""
+    return 8.0 + 22.0 * math.log10(max(lux, 1.0))
+
+
+def clamp(p):
+    return max(MIN_PCT, min(MAX_PCT, p))
+
+
+def sysfs(name):
+    with open(f"/sys/class/backlight/{DEVICE}/{name}") as f:
+        return int(f.read())
+
+
+MAX_RAW = sysfs("max_brightness")
+
+
+def to_raw(pct):
+    return max(1, round(pct / 100.0 * MAX_RAW))
+
+
+def to_pct(raw):
+    return 100.0 * raw / MAX_RAW
+
+
+def set_raw(raw):
+    subprocess.run(["brightnessctl", "-q", "-d", DEVICE, "set", str(raw)], check=False)
+
+
+def load_offset():
+    try:
+        with open(OFFSET_FILE) as f:
+            return float(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def save_offset(offset):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(OFFSET_FILE, "w") as f:
+        f.write(f"{offset:.2f}\n")
+
+
+def light_readings():
+    """Yield lux values from monitor-sensor, restarting it if it exits."""
+    while True:
+        proc = subprocess.Popen(["stdbuf", "-oL", "monitor-sensor", "--light"],
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        for line in proc.stdout:
+            if "Light changed:" in line:
+                yield float(line.split(":", 1)[1].split()[0])
+            elif "(value:" in line:
+                yield float(line.split("(value:", 1)[1].split(",")[0])
+        proc.wait()
+        time.sleep(5)
+
+
+def main():
+    if sys.argv[1:] == ["reset"]:
+        save_offset(0.0)
+        return 0
+    lock = open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "zenbook-duo-auto-brightness.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return 0
+
+    readings = light_readings()
+    log_lux = math.log10(max(next(readings), 1.0))
+    offset = load_offset()
+    last_set = sysfs("brightness")
+    if offset is None:
+        # First run: adopt the current brightness instead of jumping to the curve.
+        offset = to_pct(last_set) - curve(10 ** log_lux)
+        save_offset(offset)
+    hold_until = 0.0
+
+    for lux in readings:
+        now = time.time()
+        log_lux = (1 - EMA_ALPHA) * log_lux + EMA_ALPHA * math.log10(max(lux, 1.0))
+        current = sysfs("brightness")
+
+        stored = load_offset()
+        if stored is not None and abs(stored - offset) > 0.01:
+            # `reset` (or an edit) changed the saved offset: follow it now.
+            offset, hold_until = stored, 0.0
+
+        if current != last_set:
+            # Someone else changed it: learn their preference as the offset.
+            offset = to_pct(current) - curve(10 ** log_lux)
+            save_offset(offset)
+            last_set = current
+            hold_until = now + USER_HOLD_S
+            continue
+        if now < hold_until or os.path.exists(PAUSE_FILE):
+            continue
+
+        target = clamp(curve(10 ** log_lux) + offset)
+        if abs(target - to_pct(current)) < HYSTERESIS:
+            continue
+
+        # Fade, giving up if someone else touches the backlight mid-way.
+        start = current
+        end = to_raw(target)
+        for i in range(1, FADE_STEPS + 1):
+            if sysfs("brightness") != last_set:
+                break
+            raw = round(start + (end - start) * i / FADE_STEPS)
+            if raw != last_set:
+                set_raw(raw)
+                last_set = sysfs("brightness")
+            time.sleep(FADE_S / FADE_STEPS)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

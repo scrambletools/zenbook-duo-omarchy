@@ -5,3 +5,5 @@ o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-brightness-
 -- Zenbook Duo: rotate both screens with the device (needs iio-sensor-proxy and the
 -- ASUS sensor-hub firmware from scripts/zenbook-duo-sensor-firmware).
 o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-rotate-watch")
+-- Zenbook Duo: screen brightness follows the ambient light sensor (same firmware).
+o.launch_on_start(os.getenv("HOME") .. "/.config/zenbook/zenbook-duo-auto-brightness")
